@@ -1,0 +1,55 @@
+# PHASE 1a, sleep/wake-Test mit lazymc-docker-proxy vor dem Paper-Backend.
+# lazymc lauscht auf 25565 (LAN), zeigt "online" waehrend Paper schlaeft, weckt es bei Join,
+# stoppt es nach Idle -> RAM frei. Test OHNE Connect (Connect/Gate = Phase 1b).
+# Rueckfall: docker-compose.yml (Connect-Plugin-Variante) in Gitea + /opt/mc/docker-compose.yml.bak
+networks:
+  mc-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16      # explizit (CLAUDE.md), kollidiert nicht mit 192.0.2.10/24; lazymc braucht statische IPs
+services:
+  lazymc:
+    image: ghcr.io/joesturge/lazymc-docker-proxy:latest
+    container_name: mc-lazymc
+    restart: unless-stopped
+    networks:
+      mc-net: { ipv4_address: 172.30.0.2 }
+    volumes:
+      - ./data:/server:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "192.0.2.10:25565:25565"    # nur LAN, kein 0.0.0.0
+  mc:
+    image: itzg/minecraft-server:java25
+    container_name: mc-poc
+    stop_grace_period: 60s              # Paper sauber speichern lassen; lazymc-Stop respektiert die Container-StopTimeout (sonst SIGKILL=137 im Save)
+    networks:
+      mc-net: { ipv4_address: 172.30.0.3 }
+    labels:
+      - lazymc.enabled=true
+      - lazymc.group=mc
+      - lazymc.server.address=mc:25565
+      - lazymc.time.minimum_online_time=60
+      - lazymc.time.sleep_after=900     # 15 min leer -> schlafen (Owner-Wahl 10-15 min)
+    tty: true
+    stdin_open: true
+    restart: "no"                       # lazymc steuert den Lifecycle
+    environment:
+      EULA: "TRUE"
+      TYPE: "PAPER"
+      MEMORY: "2000M"
+      USE_AIKAR_FLAGS: "true"
+      VIEW_DISTANCE: "8"
+      SIMULATION_DISTANCE: "6"
+      MAX_PLAYERS: "8"
+      ONLINE_MODE: "TRUE"
+      ENABLE_WHITELIST: "TRUE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "__RCONPW__"
+      SPARK: "true"
+      MODRINTH_PROJECTS: "chunky,multiverse-core"
+      ENABLE_AUTOSTOP: "FALSE"
+      TZ: "Europe/Berlin"
+    volumes:
+      - ./data:/data

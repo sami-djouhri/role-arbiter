@@ -1,0 +1,9 @@
+[Unit]
+Description=game-arbiter alle 60s (Idle-Stop + Selbstheilung; VM-Verdraengung bleibt manuell)
+[Timer]
+OnBootSec=120
+OnUnitActiveSec=60
+AccuracySec=10
+Persistent=false
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,247 @@
+{
+  "_comment": "On-Demand-Registry fuer den Spiele-VPS (192.0.2.10). Anders als auf Node .18 stecken die Spiele hier NICHT in LXCs, sondern laufen host-nativ neben dem Arbiter: kind 'systemd', kein ctid, Proben gegen 127.0.0.1. Und anders als dort duerfen mehrere gleichzeitig laufen — die Bremse ist min_free_mb je Spiel, nicht mehr die Exklusivitaet. ram_mb ist der gemessene Bedarf (systemctl show -p MemoryCurrent, 2026-08-22) und zaehlt in den ersten 180 s nach einem Start mit, solange er im freien Speicher noch nicht sichtbar ist. idle_timeout_s: 0 = immer-online, >0 = Sekunden leer NACH Nutzung -> Stop.",
+  "games": [
+    {
+      "_note": "DayZ war bis zum 2026-08-23 der einzige Dauerlaeufer (idle_timeout_s=0). Begruendung damals: wer ihn schlafen legt, kann ihn ueber die Serverliste nicht wecken. Das stimmte, war aber kein Naturgesetz — es fehlte schlicht der Platzhalter, den Valheim/Zomboid/Avorion laengst hatten. Mit game-gateway-dayz bleibt er im DZSA-/Steam-Browser sichtbar (Name + ' [schlaeft - /game im Discord]'), inklusive Mod-Liste aus der RULES-Antwort, die DZSA zum Vorladen braucht. Anlass: mit 5,7 GiB ist er das mit Abstand schwerste Spiel, hatte aber seit ~14.08. null Beitritte — ein Drittel des Wirts fuer nichts. ★ Boot dauert 2-3 min: wer joint, muss vorher wecken (Discord/Clan-Seite), sonst laeuft er in einen Timeout.",
+      "name": "dayz",
+      "kind": "systemd",
+      "service": "dayz-server",
+      "greeter_service": "game-gateway-dayz",
+      "probe": {
+        "type": "a2s",
+        "ip": "127.0.0.1",
+        "port": 27016
+      },
+      "min_free_mb": 6000,
+      "ram_mb": 5800,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/dayz/dayz-server",
+        "items": [
+          "mpmissions",
+          "profiles",
+          "keys",
+          "battleye",
+          "serverDZ.cfg"
+        ]
+      },
+      "update": {
+        "kind": "steam",
+        "appid": 223350,
+        "anonym": false,
+        "user": "dayz",
+        "dir": "/home/dayz/dayz-server",
+        "hinweis": "App 223350 laedt nicht anonym: SteamCMD verlangt ein Konto, das DayZ besitzt, samt Steam-Guard-Code. Das ist kein Hindernis, das ein Werkzeug umgehen kann, sondern ein Schritt, den ein Mensch einmal tun muss. Bis dahin bleibt der Server auf seinem Build stehen, und wer mit aktuellem Client beitreten will, wird abgewiesen."
+      }
+    },
+    {
+      "_note": "Vanilla-/tModLoader-Terraria hat KEIN Query-Protokoll -> tcp-conn zaehlt die ESTABLISHED-Verbindungen auf 7777 (eine je Spieler) = echte Spielerzahl. greeter_service teilt sich den Port mit dem echten Server (nie gleichzeitig): schlaeft er, zeigt der Greeter ein Terraria-Kick-Paket 'wird gestartet' und weckt ihn. Der Arbiter stoppt ihn VOR game_start und startet ihn NACH game_stop. mods-backup/ haelt die aktiv geladenen .tmod-Binaries — ohne sie waere die Welt in Jahren nicht mehr ladbar.",
+      "name": "terraria",
+      "kind": "systemd",
+      "service": "terraria-server",
+      "multi_world": true,
+      "world_script": "/usr/local/bin/ensure-world-terraria.sh",
+      "greeter_service": "terraria-greeter",
+      "probe": {
+        "type": "tcp-conn",
+        "ip": "127.0.0.1",
+        "port": 7777
+      },
+      "min_free_mb": 2000,
+      "ram_mb": 1600,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/terraria",
+        "pre_cmd": "/usr/local/bin/mods-snapshot.sh",
+        "items": [
+          "Mods",
+          "mods-backup",
+          "serverconfig.txt"
+        ],
+        "world_items": [
+          "Worlds/{W}.wld*",
+          "Worlds/{W}.twld*",
+          "serverconfig-{w}.txt"
+        ],
+        "validate": [
+          {
+            "path": "Worlds/{W}.wld",
+            "min_bytes": 4000000,
+            "magic": "relogic",
+            "magic_offset": 4,
+            "tail_contains": "{W}"
+          },
+          {
+            "path": "Worlds/{W}.twld",
+            "min_bytes": 1000,
+            "gzip_ok": true
+          }
+        ]
+      },
+      "update": {
+        "kind": "manuell",
+        "hinweis": "tModLoader kommt nicht ueber SteamCMD (kein appmanifest) und hat keine Versions-API. Sein Stand haengt an der Mod-Liste und wird beim Mod-Pflegen mitgezogen: /home/terraria/manage-tModLoaderServer.sh, danach mods-snapshot.sh. Zuletzt von Hand gemacht am 2026-09-01 (pre-tml-update-20260901 daneben)."
+      }
+    },
+    {
+      "_note": "Valheim antwortet auf Steam-A2S nur, wenn der Server mit '-public 1' laeuft (auf .18 verifiziert). Query-Port 2457 ist getrennt vom Spielport 2456. Der Full-Tunnel ueber netcup ist mit dem Umzug entfallen: der VPS steht selbst im Netz, die Heim-IP ist gar nicht mehr im Spiel. Schlaeft der Server, verschwindet er aus der Steam-Serverliste — fuer Spieler nicht von einem kaputten Server zu unterscheiden. game-gateway-valheim haelt ihn deshalb sichtbar: es beantwortet A2S aus einem Cache (/var/lib/game-gateway/valheim.bin, einmal bei laufendem Server gefuellt) und haengt ' [schlaeft - /game im Discord]' an den Namen. Platzhalter und echter Server teilen sich den Query-Port 2457 und duerfen nie gleichzeitig laufen — systemd erzwingt das per Conflicts=, die Reihenfolge macht der Arbiter ueber dieses Feld.",
+      "name": "valheim",
+      "kind": "systemd",
+      "service": "valheim-server",
+      "probe": {
+        "type": "a2s",
+        "ip": "127.0.0.1",
+        "port": 2457
+      },
+      "min_free_mb": 2500,
+      "ram_mb": 2000,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/valheim/data",
+        "items": [
+          "worlds_local"
+        ]
+      },
+      "greeter_service": "game-gateway-valheim",
+      "update": {
+        "kind": "steam",
+        "appid": 896660,
+        "anonym": true,
+        "user": "valheim",
+        "steamcmd": "/home/valheim/steamcmd/steamcmd.sh",
+        "dir": "/home/valheim/valheim-server"
+      }
+    },
+    {
+      "_note": "Factorio spricht UDP, kennt aber RCON: '/players online' liefert die echte Spielerzahl. Das RCON-Passwort wird zur Laufzeit aus /etc/factorio/rcon.env gelesen, steht also nie hier oder im Repo. auto_pause haelt die Simulation an, wenn niemand da ist -> CPU ~0 auch vor dem Auto-Off. ★ Weckweg (seit 2026-08-23): Factorio hat als einziges Spiel hier weder Steam-A2S noch Serverlisten-Eintrag — ein Platzhalter wie bei Valheim/DayZ ist unmoeglich. Stattdessen 'factorio-greeter', ein UDP-Weckposten auf dem SPIELPORT 34197: er weckt, sobald eine Quelle ernsthaft anklopft (>=3 Datagramme in 10 s; ein Scanner sendet eines und zieht weiter). Der erste Beitrittsversuch scheitert weiterhin — Factorio braucht ~30-60 s —, der zweite traegt. Posten und Server teilen sich 34197 und duerfen nie gleichzeitig laufen (Conflicts= + dieses Feld).",
+      "name": "factorio",
+      "kind": "systemd",
+      "service": "factorio-server",
+      "greeter_service": "factorio-greeter",
+      "probe": {
+        "type": "rcon",
+        "ip": "127.0.0.1",
+        "port": 27015
+      },
+      "min_free_mb": 2000,
+      "ram_mb": 1500,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/factorio/factorio",
+        "items": [
+          "saves"
+        ]
+      },
+      "update": {
+        "kind": "factorio",
+        "user": "factorio",
+        "dir": "/home/factorio/factorio",
+        "url": "https://factorio.com/get-download/stable/headless/linux64",
+        "_note": "Factorio kommt nicht ueber Steam, sondern als tar.xz von factorio.com. Entpackt wird ueber das bestehende Verzeichnis: das Archiv bringt bin/ und data/ mit, waehrend saves/ und mods/ unberuehrt bleiben. Genau deshalb wird VOR dem Entpacken gesichert, nicht danach."
+      }
+    },
+    {
+      "_note": "PZ beantwortet Steam-A2S auf dem SPIELPORT 16261 selbst (kein getrennter Query-Port wie Valheim) -> echte Spielerzahl -> echtes idle-Auto-Off. ★ Genau daraus wurde lange geschlossen, ein Platzhalter sei hier unmoeglich (er wuerde den echten Server vom Port verdraengen). Das gilt nicht: Conflicts= in den Units und die greeter_service-Reihenfolge des Arbiters halten beide sauber auseinander, wie bei Terraria auf 7777. game-gateway-zomboid haelt den schlafenden Server deshalb in der Steam-Liste sichtbar — es beantwortet A2S aus einem Cache (/var/lib/game-gateway/zomboid.bin, einmal bei laufendem Server gefuellt) und haengt ' [schlaeft - /game im Discord]' an den Namen. Ohne ihn waere ein schlafender Server fuer Spieler nicht von einem kaputten zu unterscheiden. ★ RCON liegt auf 16263 statt des PZ-Standards 27015: den haelt auf diesem Host Factorio, und Factorio bricht beim belegten RCON-Port ab. Gemessen 4,1 GiB (Xmx3g + JVM + 7 Mods) -> nach DayZ das zweitschwerste Spiel hier. ★ Multi-Welten: PZ trennt Welten nativ ueber -servername (Config Server/<id>.ini + <id>_SandboxVars.lua, Save Saves/Multiplayer/<id>/, Spieler-DB db/<id>.db). ensure-world-zomboid.sh kopiert fuer eine neue Welt die greenleaf-Configs 1:1 — bewusst kein sed am Mods=-Feld, dessen fuehrende Backslashes je Mod-ID sind B42-Pflicht — und schreibt die aktive Welt nach /etc/zomboid/world.env, das die Unit als PZ_WORLD expandiert.",
+      "name": "zomboid",
+      "kind": "systemd",
+      "service": "zomboid-server",
+      "multi_world": true,
+      "world_script": "/usr/local/bin/ensure-world-zomboid.sh",
+      "probe": {
+        "type": "a2s",
+        "ip": "127.0.0.1",
+        "port": 16261
+      },
+      "min_free_mb": 5000,
+      "ram_mb": 4200,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/zomboid/Zomboid",
+        "items": [],
+        "world_items": [
+          "Saves/Multiplayer/{w}*",
+          "Server/{w}*",
+          "db/{w}.db"
+        ],
+        "validate": [
+          {
+            "path": "db/{w}.db",
+            "min_bytes": 8192,
+            "magic": "SQLite format 3"
+          },
+          {
+            "path": "Server/{w}.ini",
+            "min_bytes": 1000
+          }
+        ]
+      },
+      "greeter_service": "game-gateway-zomboid",
+      "update": {
+        "kind": "steam",
+        "appid": 380870,
+        "anonym": true,
+        "user": "zomboid",
+        "steamcmd": "/home/zomboid/steamcmd/steamcmd.sh",
+        "dir": "/home/zomboid/pz-server",
+        "nach_update": [
+          "sed -i 's/\"-Xmx8g\"/\"-Xmx3g\"/' /home/zomboid/pz-server/ProjectZomboid64.json"
+        ],
+        "_note_nach_update": "SteamCMD schreibt ProjectZomboid64.json bei jedem Update neu und setzt den Heap zurueck auf -Xmx8g. Bliebe das stehen, faende die JVM 8 GiB fuer sich in Ordnung, waehrend der Arbiter mit 5000 MB min_free rechnet: der Bedarf waere ploetzlich groesser als die Zahl, gegen die er Starts abwaegt. Der Nachsatz gehoert deshalb in den Update-Weg, nicht in eine Notiz."
+      }
+    },
+    {
+      "_note": "Avorions Spielverkehr laeuft ueber Steam-Networking/SDR — Port 27000 LAUSCHT NICHT, der Beitritt geht ueber die Steam-/Avorion-Serverliste, nicht ueber eine IP. Offen sind nur Query 27003, Steam-A2S 27020 und Master 27021; RCON liegt auf 27019 statt dem Avorion-Standard 27015, den auf diesem Host Factorio haelt. Die Probe zaehlt Spieler ueber A2S auf 27020. Save-on-Stop laeuft ueber die tmux-Konsole (/save, /stop), weil Avorion bei SIGTERM nicht zuverlaessig speichert. ★ ram_mb ist GEMESSEN (234 MiB RSS / 199 MiB MemoryCurrent, 2026-08-22), nicht geschaetzt: die alte .18-Angabe '~3,3 GiB' war die RAM-Zuteilung des LXC, nicht der Bedarf des Prozesses. Avorion waechst mit den geladenen Sektoren — die Galaxie ist derzeit kaum bespielt (228 KB). Wird sie erkundet, hier nachmessen.",
+      "name": "avorion",
+      "kind": "systemd",
+      "service": "avorion-server",
+      "probe": {
+        "type": "a2s",
+        "ip": "127.0.0.1",
+        "port": 27020
+      },
+      "min_free_mb": 1500,
+      "ram_mb": 700,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/home/avorion/.avorion/galaxies",
+        "items": [
+          "Greenleaf"
+        ]
+      },
+      "greeter_service": "game-gateway-avorion",
+      "update": {
+        "kind": "steam",
+        "appid": 565060,
+        "anonym": true,
+        "user": "avorion",
+        "steamcmd": "/home/avorion/steamcmd/steamcmd.sh",
+        "dir": "/home/avorion/avorion-server"
+      }
+    },
+    {
+      "_note": "Minecraft ist seit 2026-08-22 ein normaler Registry-Eintrag statt einer Sonderrolle (kind 'docker': der Stack liegt neben dem Arbiter auf demselben Wirt, nicht in einem LXC). Der Warteraum davor — Velocity 4 (:25565) + NanoLimbo — laeuft DAUERHAFT mit restart=unless-stopped und wird bewusst NICHT vom Arbiter verwaltet: er ist Minecrafts Gegenstueck zum Terraria-Greeter und haelt einen Beitretenden gehalten, waehrend das Backend hochfaehrt. Deshalb kein greeter_service. Probe 'rcon-cli' liest die echte Spielerzahl im Container (itzg bringt rcon-cli mit, das Passwort steht dort in der Umgebung) — ohne offenen Port und ohne Passwort in dieser Datei. ★ save.items nennt nur 'world': Paper 26.x legt Nether und End unter world/dimensions/ ab, die frueheren Eintraege world_nether/world_the_end existieren gar nicht mehr.",
+      "name": "minecraft",
+      "kind": "docker",
+      "container": "mc-poc",
+      "_note_greeter": "greeter_container ist REIN BEOBACHTEND: der Arbiter startet und stoppt mc-velocity nicht (das macht Docker per restart=unless-stopped), er sieht nur nach. Ohne dieses Feld waere Minecraft das einzige Spiel, bei dem ein toter Warteraum unsichtbar bleibt -- und ohne Velocity kommt niemand herein, egal wie gesund das Backend ist. Verwaltet wird ueber greeter_service; das steht hier bewusst NICHT.",
+      "greeter_container": "mc-velocity",
+      "compose_dir": "/opt/mc",
+      "probe": {
+        "type": "rcon-cli"
+      },
+      "min_free_mb": 2600,
+      "ram_mb": 2400,
+      "idle_timeout_s": 1200,
+      "save": {
+        "parent": "/opt/mc/data",
+        "items": [
+          "world"
+        ]
+      },
+      "update": {
+        "kind": "manuell",
+        "hinweis": "Paper kommt nicht ueber Steam, sondern als Image-Tag in /opt/mc/docker-compose.yml (itzg/minecraft-server, VERSION/TYPE dort). Ein Update ist ein bewusster Sprung der Serverversion und betrifft Plugins und Welt zugleich: 'docker compose pull mc-poc' und neu hochziehen, nachdem die Plugins den Zielstand koennen. Velocity dazu passend in docker-compose.velocity.yml."
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+// LimboWake — kleines Velocity-4-Plugin: holt Spieler nahtlos aus dem NanoLimbo-Warteraum ins
+// on-demand Paper-Backend, sobald es hochgefahren ist. Keine Runtime-Deps (nur Velocity-API compileOnly)
+// -> plain 'gradle jar' reicht, kein shadow. Build via gradle:jdk21-Container im LXC (hat Internet).
+plugins { id 'java' }
+repositories {
+    maven { url 'https://repo.papermc.io/repository/maven-public/' }
+    mavenCentral()
+}
+dependencies {
+    compileOnly 'com.velocitypowered:velocity-api:4.1.0-SNAPSHOT'   // 26.2-faehige Linie; guice/@Inject transitiv
+}
+// Velocity 4 ist Java-25-Bytecode -> Build mit gradle:jdk25. Keine sourceCompatibility-Vorgabe:
+// Gradle nimmt die Container-JDK 25 als Ziel-JVM (org.gradle.jvm.version=25), sonst wird die
+// velocity-api-Variante (verlangt JVM >=25) nicht aufgeloest.

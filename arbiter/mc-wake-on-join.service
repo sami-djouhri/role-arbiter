@@ -1,0 +1,16 @@
+[Unit]
+Description=mc-wake-on-join, start-on-join Trigger fuer on-demand Minecraft (folgt Gate-Logs -> wake-bridge /mc/start)
+Documentation=https://192.0.2.10:8103/games/game-arbiter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/game-arbiter/mc-wake-on-join.py
+Restart=always
+RestartSec=5
+# Optionale Overrides (COOLDOWN_S, DRY, WAKE_URL ...):
+EnvironmentFile=-/etc/default/mc-wake-on-join
+
+[Install]
+WantedBy=multi-user.target

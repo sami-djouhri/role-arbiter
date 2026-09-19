@@ -1,0 +1,8 @@
+{
+  "_comment": "Host-Profil des Spiele-VPS. Es sagt dem Arbiter, welche Rollen es hier ueberhaupt GIBT. Minecraft (LXC 203) und das Windows-AD-Lab (VM 210/211) stehen im Heim-Cluster auf Node .18 -- ohne diese Datei wuerde jeder Tick hier vergeblich pct/qm aufrufen und 'absent' melden. Fehlt die Datei, gilt das .18-Verhalten: beide Rollen an.",
+  "node": "gamehost",
+  "roles": {
+    "minecraft": false,
+    "lab": false
+  }
+}

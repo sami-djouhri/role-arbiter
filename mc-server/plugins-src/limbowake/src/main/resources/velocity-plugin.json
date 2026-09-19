@@ -1,0 +1,8 @@
+{
+  "id": "limbowake",
+  "name": "LimboWake",
+  "version": "1.0.0",
+  "description": "Holt Spieler nahtlos aus dem NanoLimbo-Warteraum ins survival-Backend, sobald es on-demand hochgefahren ist.",
+  "authors": ["greenleaf"],
+  "main": "net.greenleaf.limbowake.LimboWake"
+}
