@@ -1,0 +1,7 @@
+[Unit]
+Description=game-arbiter tick — Prioritaets-Controller (Spiele / Windows-Lab / Worker)
+After=pve-guests.service docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/game-arbiter/arbiter.py --live
+Nice=5

@@ -1,0 +1,34 @@
+# Minecraft Paper, on-demand, node-lokal (Proxmox LXC 203 auf .18), KEIN HA.
+# Deploy: liegt im LXC unter /opt/mc/. Port bindet NUR an die LXC-LAN-IP (kein 0.0.0.0, kein Public-Forward).
+# RCON-Passwort NICHT hier committen -> wird beim Deploy aus /opt/mc/.rcon injiziert (siehe deploy.sh).
+services:
+  mc:
+    image: itzg/minecraft-server:java25      # Paper MC 26.1 braucht Java 25 (java21-Image = Exit 1!)
+    container_name: mc-poc
+    stop_grace_period: 60s                    # Paper darf beim Stop sauber alle Welten speichern (sonst SIGKILL=137 mitten im Save -> Korruption)
+    tty: true
+    stdin_open: true
+    ports:
+      - "192.0.2.10:25565:25565"           # nur LAN-IP der LXC, nie 0.0.0.0
+    environment:
+      EULA: "TRUE"
+      TYPE: "PAPER"
+      MEMORY: "2000M"                         # LXC hat 4096 MB -> Heap 2000M laesst Puffer fuer Cache/Nicht-Heap
+      USE_AIKAR_FLAGS: "true"                 # (bei LXC-RAM 5 GiB kann Heap auf 2500M)
+      VIEW_DISTANCE: "8"
+      SIMULATION_DISTANCE: "6"
+      MAX_PLAYERS: "8"
+      ONLINE_MODE: "TRUE"
+      ENABLE_WHITELIST: "TRUE"                # nur eingeladene Mojang-Accounts
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "__RCONPW__"             # Platzhalter -> deploy.sh ersetzt aus /opt/mc/.rcon
+      SPARK: "true"
+      MODRINTH_PROJECTS: "chunky,multiverse-core"   # Chunky (Pregen) + Multiverse (Hub/Freebuild/Farmwelt)
+      # oeffentlicher Zugang via Minekube Connect (Outbound-Tunnel, kein Port-Forward, Heim-IP verborgen, DDoS-Schutz):
+      PLUGINS: "https://github.com/minekube/connect-java/releases/download/0.14.0/connect-spigot.jar"
+      ENABLE_AUTOSTOP: "FALSE"                # bewusst AUS: der mc-arbiter uebernimmt die Idle-/Stop-Logik
+      TZ: "Europe/Berlin"
+    volumes:
+      - ./data:/data
+    restart: "no"                            # kein Docker-Restart-Sturm; der Arbiter steuert Start/Stop/Heilung
+    # itzg bringt einen eingebauten HEALTHCHECK (mc-health) mit -> docker inspect Health.Status

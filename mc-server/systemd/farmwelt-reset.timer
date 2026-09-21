@@ -1,0 +1,10 @@
+[Unit]
+Description=Farmwelt woechentlich zuruecksetzen (Mo 05:00), Ressourcenwelt frisch, Grief folgenlos
+
+[Timer]
+OnCalendar=Mon *-*-* 05:00:00
+Persistent=true
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

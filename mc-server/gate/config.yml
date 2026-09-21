@@ -1,0 +1,31 @@
+# Gate Lite + Connect, leichtgewichtiger Go-Proxy (~10-40 MB), IMMER up.
+# Haelt den oeffentlichen Connect-Tunnel AUCH WAEHREND das Paper-Backend (mc-poc) schlaeft
+# (der Tunnel haengt an Gate, nicht am Backend -> oeffentlicher Endpoint ueberlebt MC-Sleep).
+# Lite-Modus pipet Handshake/Login/Auth zum Backend durch -> Paper bleibt online-mode + Whitelist,
+# und Lite ist dadurch robust gegen neue Protokoll-Versionen (MC 26.1). Doku: gate.minekube.com/guide/lite
+config:
+  bind: 0.0.0.0:25565
+  onlineMode: true
+  lite:
+    enabled: true
+    routes:
+      # Catch-all: jeder Hostname (LAN-IP oder <name>.play.minekube.net) -> Paper-Backend.
+      - host: '*'
+        backend: 172.30.0.3:25565        # mc-poc, statische IP im mc-net
+        cachePingTTL: 30s                # Ping-Antworten cachen (Backend nicht durch Pings wecken)
+        fallback:                        # gezeigt wenn Backend schlaeft (on-demand-Normalzustand ODER anderes Game/Lab belegt den .18-RAM)
+          # start-on-join: der mc-wake-on-join-Daemon (Node .18) sieht den Join-Versuch in den Gate-Logs
+          # und weckt MC via wake-bridge. Erster Join bootet Paper (~30-70s) -> Client bricht 1x ab -> erneut beitreten.
+          motd: |
+            §a§lGreenleaf §r§7, §e§lBeitreten startet den Server §r§7(~2 Min)
+            §7Server wird gestartet… §8kurz warten, dann erneut auf „Beitreten“
+          version:
+            name: '§ewird gestartet · in ~2 Min erneut'
+            protocol: -1
+
+# Connect = Outbound-Tunnel ins Minekube-Edge-Netz: oeffentlich erreichbar OHNE Port-Forward,
+# Heim-IP verborgen, DDoS-Schutz am Edge. Token wird beim 1. Start in ./connect.json erzeugt (persistent).
+connect:
+  enabled: true
+  name: greenleaf                  # fester Endpoint -> greenleaf.play.minekube.net (Owner-Wahl 2026-08-04);
+  #                                  ohne name = zufaelliger Name je Neustart (nur zum Testen)

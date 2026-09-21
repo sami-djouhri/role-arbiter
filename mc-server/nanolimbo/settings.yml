@@ -1,0 +1,77 @@
+# NanoLimbo v1.13.0 (kann MC 26.2 = Protokoll 776, verifiziert am Bytecode) — Greenleaf-Warteraum.
+# Haelt den Spieler VERBUNDEN in einer leeren Welt, waehrend das on-demand Paper-Backend (survival) bootet.
+# Backend hinter Velocity modern forwarding -> NanoLimbo teilt das forwarding.secret (@-Datei-Referenz).
+bind:
+  ip: "0.0.0.0"
+  port: 25565
+
+maxPlayers: 20
+
+# Serverlisten-/Ping-Antwort (falls jemand NanoLimbo direkt anpingt). protocol -1 = Client-Version spiegeln.
+ping:
+  description: "<green>Greenleaf</green> <gray>— wird gestartet…</gray>"
+  version: "<yellow>wird gestartet</yellow>"
+  protocol: -1
+
+# Leere END-Welt = ruhiger Warteraum.
+dimension: THE_END
+
+playerList:
+  enable: true
+  username: "Greenleaf"
+
+headerAndFooter:
+  enable: true
+  header: "<green><bold>Greenleaf</bold></green>"
+  footer: "<gray>Server wird gestartet — gleich geht's weiter</gray>"
+
+# 3 = Spectator (blendet HP/Hunger aus -> sauberer Warteraum).
+gameMode: 3
+
+# 1.20.5+: Secure-Chat-Toast weg.
+secureProfile: false
+
+brandName:
+  enable: true
+  content: "<green>Greenleaf (Warteraum)</green>"
+
+joinMessage:
+  enable: true
+  text: "<gray>Der Server <green>Greenleaf</green> wird gerade gestartet <gray>(~1–2 Min).</gray> <white>Du wirst automatisch verbunden, sobald er bereit ist.</white>"
+
+bossBar:
+  enable: true
+  text: "<yellow>Server wird gestartet…</yellow> <gray>bitte kurz warten</gray>"
+  health: 1.0
+  color: GREEN
+  division: SOLID
+
+title:
+  enable: true
+  title: "<green><bold>Greenleaf</bold></green>"
+  subtitle: "<yellow>wird gestartet — gleich geht's los</yellow>"
+  fadeIn: 10
+  stay: 120
+  fadeOut: 20
+
+# Player-Info-Forwarding von Velocity: MODERN + geteiltes Secret (aus Datei relativ zum Arbeitsverzeichnis).
+infoForwarding:
+  type: MODERN
+  secret: "@forwarding.secret"
+
+readTimeout: 30000
+logPlayersIp: false
+debugLevel: 2
+
+netty:
+  transportType: EPOLL
+  threads:
+    bossGroup: 1
+    workerGroup: 2
+
+traffic:
+  enable: true
+  maxPacketSize: 8192
+  interval: 7.0
+  maxPacketRate: 500.0
+  maxPacketBytesRate: 2048.0

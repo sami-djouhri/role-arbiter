@@ -1,0 +1,25 @@
+# Secrets / Laufzeit-State — nie ins Git
+.rcon
+*.pw
+.env
+connect.json
+mc-server/gate/connect.json
+mc-server/data/
+**/data/
+*.log
+state.json
+audit.log
+__pycache__/
+*.pyc
+mqtt.env
+mc-server/**/mqtt.env
+
+# Velocity/NanoLimbo Laufzeit: nur die Source-Configs (velocity.toml/settings.yml) committen,
+# Secrets + Binaries + itzg-Cache NICHT. (Weg B: Velocity 4 + NanoLimbo, 2026-08-10)
+forwarding.secret
+*.token
+*.jar
+mc-server/velocity/*
+!mc-server/velocity/velocity.toml
+mc-server/nanolimbo/*
+!mc-server/nanolimbo/settings.yml

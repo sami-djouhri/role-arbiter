@@ -1,0 +1,17 @@
+[Unit]
+Description=wake-bridge, HTTP-Trigger fuer den Game-Arbiter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ohne die Datei bleiben die Vorgaben aus wake-bridge.py: Bindung an die .18-LAN-IP.
+# Auf dem Spiele-VPS setzt sie WAKE_BIND -- so traegt EIN Unit beide Orte.
+EnvironmentFile=-/etc/default/wake-bridge
+ExecStart=/usr/bin/python3 /opt/game-arbiter/wake-bridge.py
+Restart=always
+RestartSec=5
+# laeuft als root (ruft arbiter -> pct/qm). Kein ProtectSystem: pct/qm brauchen /etc/pve.
+
+[Install]
+WantedBy=multi-user.target
