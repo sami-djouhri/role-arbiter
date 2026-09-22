@@ -1,4 +1,4 @@
-# ABGELOEST seit 2026-08-10 — NICHT MEHR AKTIV. Die laufende Proxyschicht ist
+# ABGELOEST seit 2026-08-10, NICHT MEHR AKTIV. Die laufende Proxyschicht ist
 # docker-compose.velocity.yml (Velocity 4 + NanoLimbo, "Weg B"); deploy.sh rollt diese aus.
 # Diese Datei bleibt nur als Rueckfallebene liegen. Wer sie ausrollt, kappt den oeffentlichen
 # Zugang, weil sie die Velocity-/Limbo-Container nicht kennt.

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Unit-Tests fuer die Tick-Logik des Orchestrators — ohne Node, ohne pct/qm, ohne Spielserver.
+"""Unit-Tests fuer die Tick-Logik des Orchestrators, ohne Node, ohne pct/qm, ohne Spielserver.
 
 Die vorhandene arbiter-tests.sh faehrt echte Start/Stop-Zyklen auf .18 und braucht dafuer einen
 freien Node und Minuten an Laufzeit. Diese Suite ersetzt sie nicht, sondern deckt ab, was dort
 kaum pruefbar ist: die Zeit-Logik. Alle Sensoren werden ersetzt, die Uhr wird vorgestellt, statt
-gewartet — deshalb laeuft die Suite in Sekunden und ohne Nebenwirkungen.
+gewartet, deshalb laeuft die Suite in Sekunden und ohne Nebenwirkungen.
 
 Aufruf:  python3 tests/test_timers.py
 """
@@ -34,12 +34,12 @@ def load_arbiter(tmpdir):
     # erfundenen Werte (TickHarness: avail=9000) in die ECHTE Datei des node-exporters,
     # und ein Testlauf auf dem Wirt verfaelscht die Ueberwachung: gemessen am 2026-08-28
     # sprang arbiter_speicher_frei_mb von 5786 auf glatte 9000. Schlimmer als der falsche
-    # Messwert ist die Folge — ein solcher Ausreisser setzt spiel_startbar kurz auf 1 und
+    # Messwert ist die Folge, ein solcher Ausreisser setzt spiel_startbar kurz auf 1 und
     # bricht damit die 6-Stunden-Kette von SpielDauerhaftNichtStartbar ab. Der Alarm wuerde
     # dann nie feuern, gerade weil jemand die Tests laufen laesst.
     m.METRICS_FILE = os.path.join(tmpdir, "spiele.prom")
     m.DRY = False
-    # PROFILE wird beim Import aus /opt/game-arbiter/arbiter.json gelesen — auf einem Host ohne
+    # PROFILE wird beim Import aus /opt/game-arbiter/arbiter.json gelesen, auf einem Host ohne
     # Minecraft/Lab (Spiele-VPS) haetten die MC-/Lab-Tests sonst gegen ausgeschaltete Rollen
     # geprueft und waeren dort rot gewesen, obwohl der Code stimmt. Die Tests bestimmen ihr
     # Profil deshalb selbst; wer die Rollen-Weiche testen will, setzt m.PROFILE um.
@@ -201,7 +201,7 @@ class GameUnusedTimeout(unittest.TestCase):
         self.assertNotIn("game_stop:testgame", self.h.calls, "ein bespielter Server darf nie am Grace-Timer sterben")
 
     def test_bootphase_zaehlt_nicht_mit(self):
-        """Solange die Probe keinen Kontakt hat (-1), ist der Server nicht joinbar — in dieser Zeit
+        """Solange die Probe keinen Kontakt hat (-1), ist der Server nicht joinbar, in dieser Zeit
         darf die Uhr nicht laufen, sonst stirbt ein langsam startender Server (DayZ braucht Minuten)."""
         self.h.game_players = -1
         for _ in range(3):
@@ -210,7 +210,7 @@ class GameUnusedTimeout(unittest.TestCase):
         self.assertNotIn("game_stop:testgame", self.h.calls)
 
     def test_nach_nutzung_gilt_der_idle_timer(self):
-        """Wer gespielt hat und geht, faellt in idle_timeout_s (1200) — nicht in die kuerzere Grace-Uhr."""
+        """Wer gespielt hat und geht, faellt in idle_timeout_s (1200), nicht in die kuerzere Grace-Uhr."""
         self.h.game_players = 1
         self.h.tick(self.st)
         self.h.game_players = 0
@@ -289,7 +289,7 @@ class McUnusedTimeout(unittest.TestCase):
 
 
 class AuditLogEntrauschung(unittest.TestCase):
-    """73 % des Logs waren identische Wiederholungen im Minutentakt — echte Ereignisse gingen
+    """73 % des Logs waren identische Wiederholungen im Minutentakt: echte Ereignisse gingen
     darin unter."""
 
     def setUp(self):
@@ -313,7 +313,7 @@ class AuditLogEntrauschung(unittest.TestCase):
         self.assertGreaterEqual(n, 1, "die erste Zeile muss geschrieben werden")
 
     def test_heartbeat_kommt_wieder(self):
-        """Stille darf nicht heissen 'Controller tot' — nach LOG_HEARTBEAT_S kommt ein Lebenszeichen."""
+        """Stille darf nicht heissen 'Controller tot', nach LOG_HEARTBEAT_S kommt ein Lebenszeichen."""
         self.h.tick(self.st)
         before = len(self.lines())
         self.h.advance(self.st, self.m.LOG_HEARTBEAT_S + 60)
@@ -414,7 +414,7 @@ class StatusSnapshot(unittest.TestCase):
 
     def test_erreichbar_trennt_bootend_von_leer(self):
         """players=null hiess bisher zweierlei: 'antwortet nicht' (bootet noch) und 'kein
-        Kontakt'. Die Oberflaeche zeigte beides als 'laeuft' — wer daraufhin beitrat, lief
+        Kontakt'. Die Oberflaeche zeigte beides als 'laeuft', wer daraufhin beitrat, lief
         in einen Timeout. erreichbar macht den Unterschied sichtbar."""
         self.h.reserviere(self.st, "testgame"); self.h.game_running = True
 
@@ -435,7 +435,7 @@ class StatusSnapshot(unittest.TestCase):
     def test_erreichbar_bei_tcp_conn_fragt_den_port(self):
         """★ Der Fall, an dem die erste Fassung scheiterte: `tcp-conn` zaehlt bestehende
         Verbindungen. Null davon hat ein bootender Server genauso wie ein laufender, auf
-        dem niemand spielt — gemessen an Terraria sah ein frisch gestarteter Server schon
+        dem niemand spielt: gemessen an Terraria sah ein frisch gestarteter Server schon
         in der ersten Sekunde aus wie 'laeuft'. Bei dieser Probenart muss zusaetzlich der
         Port gefragt werden, sonst ist die ganze Unterscheidung bei genau dem Spiel
         wirkungslos, das mehrere Welten hat."""
@@ -461,7 +461,7 @@ class StatusSnapshot(unittest.TestCase):
 
     def test_bedarf_und_startreserve_stehen_im_snapshot(self):
         """Damit eine Oberflaeche VOR dem Klick dieselbe Rechnung machen kann wie
-        precheck_game — statt die Zahlen zu kopieren und beim naechsten Nachmessen
+        precheck_game: statt die Zahlen zu kopieren und beim naechsten Nachmessen
         still falsch zu liegen."""
         self.h.tick(self.st)
         with open(self.m.STATUS_FILE) as f: snap = json.load(f)
@@ -470,7 +470,7 @@ class StatusSnapshot(unittest.TestCase):
         self.assertIn("min_free_mb", bedarf["testgame"])
         self.assertIn("ram_mb", bedarf["testgame"])
         self.assertIn("reserviert_startend_mb", snap["ram"])
-        # Jedes Spiel der Registry ist vertreten — sonst faellt genau die Kachel ohne
+        # Jedes Spiel der Registry ist vertreten, sonst faellt genau die Kachel ohne
         # Vorschau aus, die neu dazugekommen ist.
         self.assertEqual(set(bedarf), set(self.m.game_names()))
 
@@ -487,7 +487,7 @@ def zwei_spiele():
 
 class MehrereSpieleGleichzeitig(unittest.TestCase):
     """Der Arbiter durfte bis 2026-08-22 genau ein Spiel laufen lassen (reservation als String).
-    Auf dem Spiele-VPS laufen vier nebeneinander — ein unveraenderter Tick haette drei davon
+    Auf dem Spiele-VPS laufen vier nebeneinander, ein unveraenderter Tick haette drei davon
     abgeraeumt, darunter ein besetztes Terraria."""
 
     def setUp(self):
@@ -499,8 +499,8 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
                            "schwer": {"running": False, "players": 0}}
 
     def test_besetztes_spiel_wird_nie_abgeraeumt(self):
-        """DER Sicherheitsgurt: laeuft ein Spiel mit Spielern ohne Reservierung — etwa weil es
-        von Hand oder beim Systemstart hochkam — wird es uebernommen, nicht gestoppt."""
+        """DER Sicherheitsgurt: laeuft ein Spiel mit Spielern ohne Reservierung, etwa weil es
+        von Hand oder beim Systemstart hochkam: wird es uebernommen, nicht gestoppt."""
         self.h.je_spiel["leicht"] = {"running": True, "players": 2}
         self.h.tick(self.st)
         self.assertNotIn("game_stop:leicht", self.h.calls, "ein besetztes Spiel darf der Tick nie stoppen")
@@ -555,12 +555,12 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
     def test_erzwingen_gibt_es_nicht_mehr(self):
         """Der Erzwingen-Weg wurde am 2026-08-23 ersatzlos entfernt (Owner-Ansage: wer
         spielt, wird nicht gekickt). Dieser Test hiess vorher 'test_force_verdraengt_auch
-        _besetztes' und pruefte das Gegenteil — er blieb nach dem Ausbau stehen und war
+        _besetztes' und pruefte das Gegenteil, er blieb nach dem Ausbau stehen und war
         seitdem rot, also lief die Suite ein Jahresviertel lang nicht gruen durch.
 
         Ein Test, der einer abgeschafften Faehigkeit nachtrauert, ist schlimmer als kein
         Test: das erwartete Rot deckt jedes echte Rot daneben zu. Er prueft jetzt, was
-        gelten SOLL — dass die Faehigkeit weg ist und auch nicht heimlich zurueckkommt.
+        gelten SOLL: dass die Faehigkeit weg ist und auch nicht heimlich zurueckkommt.
         """
         import inspect
         self.assertNotIn("force", inspect.signature(self.m.cmd_start_game).parameters,
@@ -576,7 +576,7 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
 
     def test_laufendes_spiel_wird_nicht_neu_gestartet(self):
         """Der Bot ruft /wake auch, wenn jemand nur nachsehen will. Ein Neustart waere das
-        Gegenteil dessen, was gemeint ist — und wuerfe die Anwesenden heraus."""
+        Gegenteil dessen, was gemeint ist, und wuerfe die Anwesenden heraus."""
         self.h.je_spiel["leicht"] = {"running": True, "players": 2}
         r = self.m.cmd_start_game(self.st, "leicht")
         self.assertEqual(r, "already-running")
@@ -585,7 +585,7 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
 
     def test_startfenster_verhindert_den_doppelten_schweren_start(self):
         """Ein frisch gestartetes Spiel hat sein RAM noch nicht belegt. Ohne diese Buchhaltung
-        kaemen zwei schwere Starts kurz hintereinander beide durch — und der zweite killt den
+        kaemen zwei schwere Starts kurz hintereinander beide durch, und der zweite killt den
         ersten per OOM."""
         self.h.avail = 5000
         self.m.cmd_start_game(self.st, "schwer")
@@ -597,7 +597,7 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
 
     def test_nach_neustart_startet_der_tick_nicht_alles_auf_einmal(self):
         """Nach einem Neustart des Wirts sind alle Reservierungen noch da und die Dienste aus.
-        Der Tick startet sie der Reihe nach — und muss dabei mitzaehlen, was die eben
+        Der Tick startet sie der Reihe nach, und muss dabei mitzaehlen, was die eben
         gestarteten gleich belegen werden. Sonst passen im selben Durchgang mehr Spiele
         hinein, als der Wirt tragen kann, und der OOM-Killer entscheidet."""
         self.h.je_spiel = {"leicht": {"running": False, "players": -1},
@@ -614,7 +614,7 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
 
     def test_immer_online_wird_auch_nicht_verdraengt(self):
         """idle_timeout_s=0 ist eine Owner-Ansage ('laeuft durch'). Der Auto-Off-Zweig hat das
-        immer geachtet, der Verdraengungspfad nicht — am 2026-08-22 opferte er prompt den
+        immer geachtet, der Verdraengungspfad nicht, am 2026-08-22 opferte er prompt den
         DayZ-Server, weil gerade niemand darauf spielte. Wer ihn wirklich weghaben will,
         nimmt --force."""
         self.m.time.sleep = lambda s: None
@@ -640,7 +640,7 @@ class MehrereSpieleGleichzeitig(unittest.TestCase):
 
 class HostNativeSpiele(unittest.TestCase):
     """kind 'systemd' = das Spiel laeuft neben dem Arbiter statt in einem Proxmox-LXC.
-    Auf dem Spiele-VPS gibt es kein pct — ein uebersehener Aufruf liefe dort ins Leere."""
+    Auf dem Spiele-VPS gibt es kein pct, ein uebersehener Aufruf liefe dort ins Leere."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -665,7 +665,7 @@ class HostNativeSpiele(unittest.TestCase):
 
     def test_host_nativ_faehrt_keinen_container_herunter(self):
         """Nach dem Stopp eines LXC-Spiels faehrt der Arbiter den Container herunter. Host-nativ
-        gibt es keinen — ein 'pct shutdown' waere dort bestenfalls wirkungslos."""
+        gibt es keinen, ein 'pct shutdown' waere dort bestenfalls wirkungslos."""
         g = {"name": "valheim", "kind": "systemd", "service": "valheim-server"}
         self.m.game_stop(g)
         self.assertFalse(any("shutdown" in c for c in self.cmds))
@@ -673,7 +673,7 @@ class HostNativeSpiele(unittest.TestCase):
 
 class RollenWeiche(unittest.TestCase):
     """Das Host-Profil sagt, welche Rollen es an diesem Ort gibt. Auf dem Spiele-VPS existieren
-    weder Minecraft (LXC 203) noch das Win-Lab (VM 210/211) — der Tick darf sie dort nicht
+    weder Minecraft (LXC 203) noch das Win-Lab (VM 210/211), der Tick darf sie dort nicht
     einmal fragen, sonst laeuft er jede Minute in ein fehlendes pct/qm."""
 
     def setUp(self):
@@ -702,7 +702,7 @@ class RollenWeiche(unittest.TestCase):
         self.assertEqual(snap["node"], "gamehost", "der Snapshot muss sagen, WELCHER Wirt spricht")
 
     def test_proxyschicht_bleibt_bewacht_ohne_mc_rolle(self):
-        """Wird Minecraft ein normales Registry-Spiel, muss roles.minecraft aus — die
+        """Wird Minecraft ein normales Registry-Spiel, muss roles.minecraft aus, die
         ALWAYS-ON-Proxyschicht (Velocity + NanoLimbo) soll trotzdem bewacht bleiben. Sie ist
         der einzige Weckweg, der ohne Discord auskommt."""
         self.m.PROFILE = {"node": "node18", "roles": {"minecraft": False, "mc_gate": True, "lab": False}}
@@ -726,7 +726,7 @@ class RollenWeiche(unittest.TestCase):
 
 class MinecraftAlsRegistrySpiel(unittest.TestCase):
     """Minecraft war jahrelang eine eingebaute Sonderrolle mit eigener Health-Maschine. Seit dem
-    Umzug auf den Spiele-VPS ist es dort ein gewoehnlicher Registry-Eintrag — die CLI-Verben
+    Umzug auf den Spiele-VPS ist es dort ein gewoehnlicher Registry-Eintrag, die CLI-Verben
     schalteten aber weiter unbedingt auf die Sonderrolle um. Folge: --wake wurde von der alten
     Exklusivitaetsregel abgelehnt ('anderes Spiel hat Vorrang'), und --probe meldete alles auf
     false, waehrend der Container gesund lief."""
@@ -771,7 +771,7 @@ class TestsFassenDenWirtNichtAn(unittest.TestCase):
 
     Anlass: die Tick-Tests schrieben ihre erfundenen Werte in die ECHTE Metrikdatei des
     node-exporters, weil load_arbiter() zwar BASE/STATE/STATUS umbog, METRICS_FILE aber
-    nicht. Ein Testlauf auf dem Wirt hat damit die Ueberwachung verfaelscht — und ein
+    nicht. Ein Testlauf auf dem Wirt hat damit die Ueberwachung verfaelscht, und ein
     solcher Ausreisser bricht die Karenzzeit der Alarme."""
 
     def setUp(self):
@@ -783,7 +783,7 @@ class TestsFassenDenWirtNichtAn(unittest.TestCase):
                      "METRICS_FILE"):
             pfad = getattr(self.m, name)
             self.assertTrue(pfad.startswith(self.tmp),
-                            f"{name} zeigt auf {pfad} — ausserhalb des Testverzeichnisses")
+                            f"{name} zeigt auf {pfad}: ausserhalb des Testverzeichnisses")
 
     def test_kein_schreibpfad_zeigt_in_den_exporter_ordner(self):
         """Namentlich, weil genau dieser Ordner dem node-exporter gehoert und ein
@@ -795,7 +795,7 @@ class TestsFassenDenWirtNichtAn(unittest.TestCase):
 class AbsageIstKeinErfolg(unittest.TestCase):
     """Der Rueckgabewert von cmd_start_game wird zum Exit-Code und darueber zur Meldung,
     die ein Spieler in Discord sieht. Bis zum 2026-08-27 stand dort eine Negativ-Liste
-    (`3 if r in ("rejected","bad-world") else 0`) — und weil "no-ram" spaeter dazukam, ohne
+    (`3 if r in ("rejected","bad-world") else 0`), und weil "no-ram" spaeter dazukam, ohne
     aufgenommen zu werden, meldete eine Speicher-Absage rc=0. Der Bot zeigte einen
     Ladebalken fuer einen Server, der nie startete. Das ist heute keine Theorie: solange
     das 14B laeuft, ist DayZ dauerhaft nicht startbar."""
@@ -809,7 +809,7 @@ class AbsageIstKeinErfolg(unittest.TestCase):
 
     def test_jede_absage_faellt_auf_die_fehlerseite(self):
         """Der Kern: die Liste ist eine POSITIV-Liste. Kommt morgen ein neuer
-        Rueckgabewert dazu, ist er automatisch ein Fehler statt still ein Erfolg —
+        Rueckgabewert dazu, ist er automatisch ein Fehler statt still ein Erfolg,
         genau der Weg, auf dem 'no-ram' durchgerutscht ist."""
         for absage in ("no-ram", "unknown", "rejected", "bad-world", "voellig-neuer-fall"):
             self.assertNotIn(absage, self.m.START_ERFOLG,
@@ -826,12 +826,12 @@ class AbsageIstKeinErfolg(unittest.TestCase):
                                               "wartung"}
         self.assertTrue(rueckgaben, "es muessen Rueckgabewerte gefunden werden")
         self.assertFalse(rueckgaben - bekannt,
-                         f"unbedachte Rueckgabe(n): {rueckgaben - bekannt} — Exit-Code pruefen")
+                         f"unbedachte Rueckgabe(n): {rueckgaben - bekannt}, Exit-Code pruefen")
 
 
 class SpielMetriken(unittest.TestCase):
     """Ein schlafendes Spiel und ein kaputtes sehen von aussen identisch aus: beide antworten
-    nicht. Die Metriken sollen genau diese Verwechslung aufloesen — deshalb wird hier vor allem
+    nicht. Die Metriken sollen genau diese Verwechslung aufloesen, deshalb wird hier vor allem
     geprueft, dass der KAPUTTE Zustand auch wirklich als solcher herauskommt. Ein Waechter, der
     nur den Normalfall beschreibt, faellt genau dann aus, wenn man ihn braucht."""
 
@@ -859,21 +859,21 @@ class SpielMetriken(unittest.TestCase):
 
     def test_weder_server_noch_platzhalter_meldet_nicht_weckbar(self):
         """DER Kernfall. Faellt der Platzhalter aus, waehrend der Server schlaeft, ist das Spiel
-        fuer Spieler tot — der Wirt sieht dabei kerngesund aus. Ohne diese Zeile merkt es
+        fuer Spieler tot, der Wirt sieht dabei kerngesund aus. Ohne diese Zeile merkt es
         niemand, bis sich jemand beschwert."""
         t = self._schreibe(server_laeuft=False, platzhalter_laeuft=False)
         self.assertIn('spiel_weckbar{spiel="valheim"} 0', t)
 
     def test_schlafend_aber_mit_platzhalter_gilt_als_weckbar(self):
         """Der Normalfall darf keinen Alarm ausloesen: Server aus, Platzhalter haelt ihn in der
-        Serverliste sichtbar und weckt ihn — das ist gesund, nicht kaputt."""
+        Serverliste sichtbar und weckt ihn, das ist gesund, nicht kaputt."""
         t = self._schreibe(server_laeuft=False, platzhalter_laeuft=True)
         self.assertIn('spiel_weckbar{spiel="valheim"} 1', t)
         self.assertIn('spiel_server_aktiv{spiel="valheim"} 0', t)
         self.assertIn('spiel_platzhalter_aktiv{spiel="valheim"} 1', t)
 
     def test_laufender_server_ohne_platzhalter_ist_normal(self):
-        """Waehrend der Server laeuft, MUSS der Platzhalter aus sein — sie teilen sich den Port.
+        """Waehrend der Server laeuft, MUSS der Platzhalter aus sein, sie teilen sich den Port.
         Das darf nicht als Stoerung durchschlagen."""
         t = self._schreibe(server_laeuft=True, platzhalter_laeuft=False)
         self.assertIn('spiel_weckbar{spiel="valheim"} 1', t)
@@ -906,7 +906,7 @@ class SpielMetriken(unittest.TestCase):
 
     def test_datei_ist_fuer_den_exporter_lesbar(self):
         """Der node-exporter laeuft als eigener Nutzer, der Arbiter als root. Ohne das chmod
-        traegt die Datei 0600 und der Exporter meldet still einen Lesefehler — die Metriken
+        traegt die Datei 0600 und der Exporter meldet still einen Lesefehler, die Metriken
         fehlen dann einfach, was von 'alles ruhig' nicht zu unterscheiden ist."""
         self._schreibe(False, True)
         self.assertTrue(os.stat(self.m.METRICS_FILE).st_mode & 0o004,
@@ -922,7 +922,7 @@ class SpielMetriken(unittest.TestCase):
 class PlatzhalterNachDemStopp(unittest.TestCase):
     """Nach dem Server-Stopp uebernimmt der Platzhalter den Port und ist von da an der einzige
     Weckweg. Frueher lief sein Start ungeprueft durch: schlug er fehl, war das Spiel weder wach
-    noch weckbar — und nichts im Log sagte das.
+    noch weckbar, und nichts im Log sagte das.
 
     Kein TickHarness: der ersetzt game_stop durch eine Attrappe, hier soll aber genau der
     echte Ablauf geprueft werden."""

@@ -16,13 +16,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * LimboWake — der nahtlose Teil des Greenleaf on-demand MC-Netzes (Weg B, 2026-08-10).
+ * LimboWake, der nahtlose Teil des Greenleaf on-demand MC-Netzes (Weg B, 2026-08-10).
  *
  * Kontext: Velocity 4 (spricht MC 26.2 nativ) + NanoLimbo (Warteraum) + Paper (survival, on-demand).
  * try = ["survival", "limbo"]: ist survival aus, landet der Spieler AUTOMATISCH im Limbo und bleibt
  * dort VERBUNDEN ("wird gestartet…"). Das Wecken uebernimmt host-seitig mc-wake-on-join (Velocity-Logs
  * -> wake-bridge). Dieses Plugin macht den letzten, nahtlosen Schritt: sobald survival oben ist, holt
- * es die im Limbo wartenden Spieler von selbst hinueber — kein Reconnect, kein /server-Tippen.
+ * es die im Limbo wartenden Spieler von selbst hinueber, kein Reconnect, kein /server-Tippen.
  *
  * Bewusst rein Velocity-intern: keine HTTP-Calls, keine Tokens, keine externen Deps (nur Velocity-API).
  * LimboAutoServer (die fertige Loesung) haengt an LimboAPI, das MC 26.x nicht kann -> dieses ~1-Datei-

@@ -1,4 +1,4 @@
-# Velocity 4.x (config-version 2.8) — Greenleaf on-demand MC-Netz (LXC 203 auf .18).
+# Velocity 4.x (config-version 2.8): Greenleaf on-demand MC-Netz (LXC 203 auf .18).
 # Ersetzt Gate Lite: Velocity 4 spricht MC 26.2 nativ (ProtocolVersion enthaelt 26.1/26.2 verifiziert).
 # ALWAYS-ON Proxy vor dem on-demand Paper-Backend (mc) + NanoLimbo (limbo, Warteraum).
 # Oeffentlicher Zugang weiter via Minekube Connect (connect-velocity Plugin) -> greenleaf.play.minekube.net.
@@ -7,7 +7,7 @@ config-version = "2.8"
 # Proxy bindet auf 25565 (LAN-Publish nur 192.0.2.10:25565; oeffentlich laeuft ueber Connect-Outbound).
 bind = "0.0.0.0:25565"
 # Statische MOTD (on-demand: Backend schlaeft im Normalzustand -> ehrliche "wird gestartet"-Zeile).
-motd = "<green><bold>Greenleaf</bold></green> <gray>— Beitreten startet den Server (~2 Min)</gray>"
+motd = "<green><bold>Greenleaf</bold></green> <gray>: Beitreten startet den Server (~2 Min)</gray>"
 show-max-players = 8
 # Mojang-Auth am Proxy (Connect injiziert die authentifizierte Session -> Whitelist-UUIDs bleiben korrekt).
 online-mode = true

@@ -2,7 +2,7 @@
 # Velocity 4 spricht MC 26.2 nativ -> nahtloser Limbo-Warteraum OHNE Backend-Downgrade (Weg B).
 #   velocity   ALWAYS-ON  Proxy (~512M) + connect-velocity (Tunnel greenleaf.play.minekube.net) + LimboWake-Plugin
 #   nanolimbo  ALWAYS-ON  Warteraum (~256M): haelt den Spieler verbunden waehrend survival bootet
-#   mc         ON-DEMAND  Paper 26.2 (survival) — Start/Stop steuert der mc-arbiter (compose up/stop -d mc)
+#   mc         ON-DEMAND  Paper 26.2 (survival): Start/Stop steuert der mc-arbiter (compose up/stop -d mc)
 # Modern forwarding: alle drei teilen /opt/mc/velocity/forwarding.secret (NIE committen, Deploy erzeugt es).
 # RCON-pw wird beim Deploy aus /opt/mc/.rcon in den mc-Service injiziert (Platzhalter __RCONPW__).
 networks:

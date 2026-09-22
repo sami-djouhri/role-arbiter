@@ -81,7 +81,7 @@ $SSH "test -s /opt/game-arbiter/wake.token || { openssl rand -hex 32 > /opt/game
 $SSH "systemctl daemon-reload && systemctl enable wake-bridge.service >/dev/null 2>&1 && systemctl restart wake-bridge.service && echo '  wake-bridge.service enabled + (re)started'"
 
 echo "== 1c. Arbiter-Tick (Timer alle 60s: Idle-Stop + Selbstheilung) =="
-# Lagen bis 2026-08-20 nur live auf .18 und in keinem Rezept — dadurch war der
+# Lagen bis 2026-08-20 nur live auf .18 und in keinem Rezept: dadurch war der
 # Timer, der das gesamte Auto-Off traegt, bei einem Node-Neuaufbau verloren.
 $SSH "cat > /etc/systemd/system/game-arbiter.service" < "$HERE/arbiter/game-arbiter.service"
 $SSH "cat > /etc/systemd/system/game-arbiter.timer"   < "$HERE/arbiter/game-arbiter.timer"

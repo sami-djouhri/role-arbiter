@@ -157,7 +157,7 @@ base=lambda **kw: dict({"mode":"IDLE","reservation":"none","restart_count":0,
 m.tick(base(),False,False)
 chk("valheim" in stopped and "dayz" not in stopped,"7a dayz reserviert -> leeres valheim weicht, dayz bleibt")
 # 7a2/7a3 Auto-Off gegen den Schutz. Ein leeres Spiel, das die Frist ueberschritten hat, geht
-# normalerweise aus (7a2). Ist es reserviert, bleibt es an (7a3) — sonst waere der Schalter
+# normalerweise aus (7a2). Ist es reserviert, bleibt es an (7a3), sonst waere der Schalter
 # wirkungslos, denn 'reserviert' und 'gerade leer' treffen typischerweise zusammen.
 import time as _t
 _alt = lambda **kw: dict({"since":None,"idle_since":_t.time()-99999,"unused_since":None,
@@ -262,7 +262,7 @@ chk(m.cmd_start_game(base(games={"dayz":slot()}),"valheim")=="started" and "dayz
 m.game_players=lambda g:3 if g["name"]=="dayz" else 0
 gstop=[]
 chk(m.cmd_start_game(base(games={"dayz":slot(was_used=True)}),"valheim")=="rejected" and not gstop,"9c RAM knapp + dayz(3P) -> valheim rejected, dayz bleibt")
-# 9d RESERVIERTES, aber LEERES dayz weicht nicht — der Schutz gilt gerade dann, wenn niemand
+# 9d RESERVIERTES, aber LEERES dayz weicht nicht, der Schutz gilt gerade dann, wenn niemand
 # drauf ist. Ohne ihn waere 9b der Normalfall und ein reserviertes Spiel jederzeit abraeumbar.
 # (Hier stand bis 2026-08-23 der --force-Test: 'verdraengt auch Besetztes'. Genau das gibt es
 # nicht mehr, deshalb prueft die Stelle jetzt das Gegenteil.)
@@ -353,7 +353,7 @@ ZOMB={"name":"zomboid","kind":"systemd","service":"zomboid-server","multi_world"
 ALT ={"name":"altspiel","kind":"systemd","service":"alt-server","multi_world":True}
 m.GAMES=[TERR,ZOMB,ALT]
 m.world_info=lambda n:("greenleaf",["greenleaf","solo"])
-# 11a/11b: zwei Spiele auf EINEM Wirt duerfen nie dasselbe Skript rufen — das war der Fehler,
+# 11a/11b: zwei Spiele auf EINEM Wirt duerfen nie dasselbe Skript rufen, das war der Fehler,
 # der auf gamehost Terrarias serverconfig.txt ueberschrieben haette.
 CMDS[:]=[]; m.game_start(TERR, world="solo")
 t_ok = any("ensure-world-terraria.sh solo" in c for c in CMDS)

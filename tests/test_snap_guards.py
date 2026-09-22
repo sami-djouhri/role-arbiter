@@ -103,7 +103,7 @@ def fake_run_rc1(cmd, timeout=30):
     return 1, "", "tar: file changed as we read it"
 m.run = fake_run_rc1
 ok = m._snap_tar(TERRARIA_LXC, "/home/terraria", ["Worlds"], dest, shrink_max_pct=50)
-t("uebernommen", ok is True, "(Server schreibt live weiter — kein Fehler)")
+t("uebernommen", ok is True, "(Server schreibt live weiter, kein Fehler)")
 
 shutil.rmtree(tmpd, ignore_errors=True)
 print()

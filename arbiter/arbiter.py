@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """
-game-arbiter (Dateiname arbiter.py aus Timer-Kompatibilitaet) — Ressourcen-Prioritaets-
+game-arbiter (Dateiname arbiter.py aus Timer-Kompatibilitaet): Ressourcen-Prioritaets-
 Controller fuer die on-demand-Spielserver.
 
 Er laeuft seit 2026-08-22 an ZWEI Orten, gesteuert von /opt/game-arbiter/arbiter.json:
   * Proxmox-Node .18 (hypervisor3): Spiele in LXCs (kind lxc-systemd/lxc-docker), dazu Minecraft
-    und das Windows-AD-Lab. Ohne Profil-Datei gilt genau dieses Verhalten — unveraendert.
+    und das Windows-AD-Lab. Ohne Profil-Datei gilt genau dieses Verhalten: unveraendert.
   * Spiele-VPS: Spiele host-nativ als systemd-Dienste (kind systemd), kein pct/qm, kein
     Minecraft, kein Lab. roles.minecraft/roles.lab stehen dort auf false.
 
 Prioritaet:  BASIS (xtts/gateway/app-offload, unantastbar)
            > belegte Rolle (Game ODER Minecraft mit >0 Spielern, ODER reserviertes Win-Lab)
            > reservierte, aber leere Rolle
-           > P3 unterbrechbare Worker (CI/restic/OCR/Chunky) — advisory, nicht aktiv verwaltet
+           > P3 unterbrechbare Worker (CI/restic/OCR/Chunky): advisory, nicht aktiv verwaltet
 
-On-Demand-Modell (seit 2026-08-07 — MC ist KEINE Sonderrolle mehr): Alle schweren Rollen
+On-Demand-Modell (seit 2026-08-07: MC ist KEINE Sonderrolle mehr): Alle schweren Rollen
 (Minecraft + die Spiele der Registry + Win-Lab) sind ON-DEMAND und gleichrangig. NICHTS laeuft
 standardmaessig; der Wirt ist idle, wenn niemand spielt.
 
 MEHRERE SPIELE GLEICHZEITIG (seit 2026-08-22): Die Reservierung ist keine einzelne Rolle mehr,
-sondern eine Menge — st["games"] haelt je Spiel eigene Uhren. Ob ein weiteres Spiel starten darf,
+sondern eine Menge: st["games"] haelt je Spiel eigene Uhren. Ob ein weiteres Spiel starten darf,
 entscheidet der freie Speicher (min_free_mb je Spiel), nicht mehr die Exklusivitaet. Auf .18
 kommt dabei praktisch dasselbe heraus wie vorher, weil dort ohnehin nur eines hineinpasst; auf
 dem Spiele-VPS laufen vier nebeneinander. Ein Spiel MIT Spielern wird nie abgeraeumt: laeuft es
 ohne Reservierung, uebernimmt der Tick es, statt es zu stoppen. st["reservation"] traegt weiter
-'lab' und 'minecraft' — die beiden bleiben exklusiv. Minecraft wird — wie jedes Game — per Reservation geweckt (reservation=='minecraft',
+'lab' und 'minecraft', die beiden bleiben exklusiv. Minecraft wird, wie jedes Game, per Reservation geweckt (reservation=='minecraft',
 via --wake minecraft / --start-mc / wake-bridge /mc/start bzw. /wake/minecraft) und geht nach
 idle_timeout_s leer wieder aus (echte Spielerzahl via rcon list). Frueheres 'MC immer-online, wenn
 kein Lab' ist ENTFERNT. Gate (Lite) haelt den oeffentlichen Connect-Tunnel DAUERHAFT und ist NICHT
@@ -32,25 +32,25 @@ vom Orchestrator gesteuert; ist MC aus, sieht der Spieler offline -> /minecraft 
 Ein Gehirn = dieser Orchestrator steuert ausschliesslich mc-poc (docker compose ... mc), nie Gate.
 
 Zwei Auto-Off-Uhren je Rolle (beide brauchen eine Probe, die echte Spielerzahlen liefert):
-  * idle_timeout_s   — war jemand da und ist wieder weg -> nach N s leer aus.
-  * unused_timeout_s — geweckt, joinbar, aber NIE betreten -> nach N s aus ('geweckt und vergessen').
+  * idle_timeout_s: war jemand da und ist wieder weg -> nach N s leer aus.
+  * unused_timeout_s: geweckt, joinbar, aber NIE betreten -> nach N s aus ('geweckt und vergessen').
     Der Zaehler startet erst, wenn der Server antwortet, die Bootzeit zaehlt also nie mit.
     idle_timeout_s<=0 (bewusst immer-online) schaltet auch diese Uhr ab.
 
 Yield-Politik (tick):
   * minecraft reserviert   -> MC wach (on-demand), Idle-Auto-Off nach idle_timeout_s leer
   * minecraft NICHT reserviert (Game/Lab reserviert ODER Node idle) -> MC schlaeft (weicht)
-  * MC-Crash-Recovery/FAILED-Latch bleibt (einziger Rest-Vorzug) — nur aktiv, wenn MC reserviert laeuft
+  * MC-Crash-Recovery/FAILED-Latch bleibt (einziger Rest-Vorzug), nur aktiv, wenn MC reserviert laeuft
   * Win-Lab: reserviert -> geschuetzt; unreserviert + keine Sitzung >45min -> graceful Idle-Auto-Off
 
 Start-Prio: Reicht der freie Speicher, startet ein Spiel, ohne dass irgendjemand weicht. Reicht
-er nicht, weichen zuerst LEERE Rollen (leere Spiele — laengste Leerzeit zuerst —, schlafendes MC,
+er nicht, weichen zuerst LEERE Rollen (leere Spiele: laengste Leerzeit zuerst, dann schlafendes MC,
 unreserviertes Lab). Bleibt es zu eng, entscheidet blocking_role: eine BELEGTE Rolle (Game/MC mit
 >0 Spielern) hat Vorrang, der Start wird ABGELEHNT (--wake: exit 3 + Log-Zeile fuer Discord).
 Ein RESERVIERTES Win-Lab hat unabhaengig vom Speicher Vorrang, das ist eine ausdrueckliche
 Owner-Ansage.
 
-Wer spielt, wird NICHT gekickt — es gibt keinen Override (Owner-Ansage 2026-08-23, das fruehere
+Wer spielt, wird NICHT gekickt, es gibt keinen Override (Owner-Ansage 2026-08-23, das fruehere
 --force ist ersatzlos entfallen). Wem der Platz fehlt, der bekommt eine Absage und versucht es
 spaeter erneut; ein leeres Spiel raeumt dagegen von selbst den Weg. Eine RESERVIERUNG
 (--reserve-game / --reserve-lab, im Lab 'Wartungsmodus') schuetzt eine Rolle auch dann, wenn
@@ -127,19 +127,19 @@ def backoff_s(fehler):
 # Discord. Frueher endete jede Absage mit dem Hinweis, ein Superadmin koenne sie per
 # --force uebergehen; seit dem 2026-08-23 gibt es diesen Weg nicht mehr (Owner-Ansage:
 # wer spielt, wird nicht gekickt). Eine Absage ist deshalb endgueltig und muss dem
-# Anfragenden sagen, was er stattdessen tun kann — sonst sucht er nach dem Schalter.
+# Anfragenden sagen, was er stattdessen tun kann, sonst sucht er nach dem Schalter.
 ABSAGE_BELEGT   = "dort wird gerade gespielt und niemand wird aus dem Spiel geworfen."
 ABSAGE_KEIN_RAM = "der Arbeitsspeicher des Wirts reicht dafuer gerade nicht."
 
 # Welche Rueckgaben von cmd_start_game gelten als Erfolg. ★ Bewusst eine POSITIV-Liste:
 # bis zum 2026-08-27 stand hier die Umkehrung (`3 if r in ("rejected","bad-world") else 0`),
 # und weil "no-ram" spaeter dazukam, ohne in dieser Liste zu landen, meldete eine
-# Speicher-Absage rc=0 — also Erfolg. Der Spieler sah im Discord einen Ladebalken fuer
+# Speicher-Absage rc=0, also Erfolg. Der Spieler sah im Discord einen Ladebalken fuer
 # einen Server, der nie startete. Dasselbe galt fuer "unknown" (vertippter Spielname).
 # Mit einer Positiv-Liste faellt jede kuenftige Rueckgabe auf die Fehlerseite, statt still
 # als Erfolg durchzurutschen.
 START_ERFOLG = ("started", "already-running")
-ABSAGE_NACHSATZ = "Bitte spaeter erneut versuchen — sobald dort niemand mehr spielt, geht es von selbst."
+ABSAGE_NACHSATZ = "Bitte spaeter erneut versuchen: sobald dort niemand mehr spielt, geht es von selbst."
 
 # Audit-Log: Der Tick schrieb bisher JEDE Minute eine Lagezeile, auch wenn sich nichts aenderte
 # (73 % des Logs waren identische Wiederholungen, 5,8 MB ohne Rotation). Wiederkehrende
@@ -171,7 +171,7 @@ _SIM_LAB = None
 # --- Host-Profil: was es an DIESEM Ort ueberhaupt gibt --------------------------
 # Der Arbiter laeuft seit 2026-08-22 an zwei Orten: auf Proxmox-Node .18 (Spiele in LXCs,
 # dazu Minecraft und das Windows-Lab) und host-nativ auf dem Spiele-VPS (systemd-Dienste,
-# kein pct/qm, kein MC, kein Lab). Ohne Profil-Datei bleibt alles wie auf .18 — deshalb
+# kein pct/qm, kein MC, kein Lab). Ohne Profil-Datei bleibt alles wie auf .18, deshalb
 # aendert sich dort durch diesen Umbau nichts.
 # mc_gate ist bewusst von minecraft getrennt: die Proxyschicht (Velocity + NanoLimbo) ist
 # ALWAYS-ON und der einzige Weckweg, der ohne Discord auskommt. Wird Minecraft irgendwann ein
@@ -225,7 +225,7 @@ DEFAULT_WORLD = "greenleaf"
 
 def mc_sonderrolle(name):
     """Soll <name> ueber die EINGEBAUTE Minecraft-Maschine laufen (eigene Health-/Crash-Logik,
-    Proxyschicht, mc_stop/mc_start) — oder als gewoehnliches Registry-Spiel?
+    Proxyschicht, mc_stop/mc_start), oder als gewoehnliches Registry-Spiel?
 
     Ein ausdruecklicher Eintrag in games.json gewinnt IMMER. Das ist der Unterschied zwischen
     'es gibt hier eine Minecraft-Rolle' und 'jemand hat Minecraft als Spiel eingetragen'.
@@ -300,7 +300,7 @@ def cmd_create_world(name, wid, label=None):
 # save-Spec kommt aus games.json (parent/items/world_items); Minecraft hat keinen
 # games.json-Eintrag (eigene Rolle) -> Spec hier. Snapshots laufen bei laufendem
 # LXC via pct exec, bei gestopptem via pct mount vom Host (kein Boot, keine
-# Service-Autostarts) — behebt zugleich, dass der alte Nightly-Hook gestoppte
+# Service-Autostarts): behebt zugleich, dass der alte Nightly-Hook gestoppte
 # LXCs uebersprang und die Tars seit dem LXC-Shutdown-Umbau einfroren.
 GS_DIR = "/var/backups/game-saves"
 MANUAL_DIR = GS_DIR + "/manual"
@@ -312,7 +312,7 @@ def _save_spec(name):
     return (game_by_name(name) or {}).get("save")
 
 def _snap_ctx(name):
-    """Der Ort, an dem die Welt-Dateien liegen — als Registry-Eintrag, den _in() lesen kann.
+    """Der Ort, an dem die Welt-Dateien liegen: als Registry-Eintrag, den _in() lesen kann.
     Minecraft hat keinen eigenen games.json-Eintrag, wohnt aber im LXC 203; deshalb hier ein
     Stellvertreter statt einer zweiten Fallunterscheidung in jeder Snapshot-Funktion."""
     if mc_sonderrolle(name): return {"name": "minecraft", "kind": "lxc-systemd", "ctid": CFG["mc_ctid"]}
@@ -342,13 +342,13 @@ def _lxc_unmount(ctid):
 # leere Menge = Fehler (nie ein leeres/kaputtes Tar ueber ein gutes schieben).
 _COLLECT = 'd=; for x in %s; do [ -e "$x" ] && d="$d $x"; done; [ -n "$d" ] || exit 1'
 
-# Eigener Exit-Code fuer die Welt-Pruefung — klar unterscheidbar von tar-rc 1
+# Eigener Exit-Code fuer die Welt-Pruefung: klar unterscheidbar von tar-rc 1
 # ("file changed as we read it"), das wir bewusst tolerieren.
 _CHECK_RC = 9
 
 def _snap_pre_cmd(ctx, spec):
     """save.pre_cmd am Spiel-Ort ausfuehren, bevor getart wird (Terraria: die aktiv geladenen
-    Mod-Binaries nach mods-backup/ spiegeln). Bei einem gestoppten LXC entfaellt es — ein
+    Mod-Binaries nach mods-backup/ spiegeln). Bei einem gestoppten LXC entfaellt es, ein
     gestoppter Container kann nichts erzeugen, dort wird der zuletzt erzeugte Stand einfach
     mitgesichert. Fehler sind eine Warnung, kein Abbruch: die Welt zu sichern ist wichtiger
     als ihr Beiwerk."""
@@ -357,13 +357,13 @@ def _snap_pre_cmd(ctx, spec):
         return
     rc, out, err = run(_in(ctx, "sh -c '%s'" % cmd), timeout=300)
     if rc != 0:
-        audit("[snapshot] pre_cmd '%s' rc=%d — weiter ohne frischen Stand (%s)"
+        audit("[snapshot] pre_cmd '%s' rc=%d: weiter ohne frischen Stand (%s)"
               % (cmd, rc, (err or out or "").splitlines()[-1:] or ""))
 
 def _check_frag(checks, world):
     """sh-Fragment, das die Kern-Dateien VOR dem Tar prueft. Faengt den Fall ab, in dem
     ein abgeschnittener/leerer Weltstand den letzten guten im festen Nightly-Ziel
-    ueberschreibt. Meldungen nach stderr — stdout ist der Tar-Strom.
+    ueberschreibt. Meldungen nach stderr: stdout ist der Tar-Strom.
     Geprueft wird gegen das echte Terraria-Format (2026-08-22 an der Live-Welt
     verifiziert): .wld traegt 'relogic' ab Byte 4 und schliesst mit dem Weltnamen ab
     (Terrarias eigene Vollstaendigkeits-Kennung), .twld ist gzip und damit per CRC
@@ -410,7 +410,7 @@ def _shrink_ok(tmp, dest, max_pct):
     if old <= 0 or new >= old * (100 - max_pct) / 100.0:
         return True
     audit("[snapshot] ABGEBROCHEN: neues Archiv %.1f MiB gegen bisher %.1f MiB (mehr als "
-          "%d%% geschrumpft) — alter Stand bleibt. Wenn gewollt: %s loeschen."
+          "%d%% geschrumpft): alter Stand bleibt. Wenn gewollt: %s loeschen."
           % (new / 1048576.0, old / 1048576.0, max_pct, dest))
     return False
 
@@ -422,7 +422,7 @@ def _snap_tar(ctx, parent, items, dest, check="", shrink_max_pct=None):
     tail = ((check + "; ") if check else "") + (_COLLECT % " ".join(items)) \
            + "; tar czf - $d 2>/dev/null"
     if not game_is_lxc(ctx):
-        # Host-nativ: die Welt liegt im Dateisystem des Arbiters selbst — kein Umweg,
+        # Host-nativ: die Welt liegt im Dateisystem des Arbiters selbst, kein Umweg,
         # kein Mount, gleicher Pfad ob der Dienst laeuft oder nicht.
         inner = ("cd %s 2>/dev/null || exit 1; " % parent) + tail
         rc, _, err = run(inner + " > " + tmp, timeout=600)
@@ -439,7 +439,7 @@ def _snap_tar(ctx, parent, items, dest, check="", shrink_max_pct=None):
         finally:
             _lxc_unmount(ctx["ctid"])
     if rc == _CHECK_RC:
-        audit("[snapshot] Welt-Pruefung fehlgeschlagen: %s — alter Stand bleibt unangetastet"
+        audit("[snapshot] Welt-Pruefung fehlgeschlagen: %s, alter Stand bleibt unangetastet"
               % ((err or "").strip().splitlines() or ["ohne Angabe"])[-1])
         try: os.remove(tmp)
         except OSError: pass
@@ -514,13 +514,13 @@ def cmd_snapshot(name, world=None, nightly=False, prefix=""):
         if not nightly:
             _prune_manual(name, (prefix and prefix + "-") + token)
         return 0
-    audit("[snapshot:%s] FEHLGESCHLAGEN (%s) — vorheriger Stand (falls vorhanden) bleibt"
+    audit("[snapshot:%s] FEHLGESCHLAGEN (%s), vorheriger Stand (falls vorhanden) bleibt"
           % (name, os.path.relpath(dest, GS_DIR)))
     return 1
 
 def cmd_snapshot_all():
     """Nightly-Lauf (restic-Pre-Hook): alle Games, bei multi_world jede Welt.
-    Fehlertolerant (rc immer 0) — je Game bleibt der letzte gute Stand liegen."""
+    Fehlertolerant (rc immer 0), je Game bleibt der letzte gute Stand liegen."""
     for name in ["minecraft"] + game_names():
         if not _save_spec(name):
             continue
@@ -616,7 +616,7 @@ def cmd_restore(st, name, relfile):
     if not src:
         audit("[restore:%s] ungueltige Datei '%s'" % (name, relfile)); return 5
     if _game_running(name) or game_reserved(st, name) or st.get("reservation") == name:
-        audit("[restore:%s] ABGELEHNT: Spiel laeuft oder ist reserviert — erst stoppen" % name); return 4
+        audit("[restore:%s] ABGELEHNT: Spiel laeuft oder ist reserviert, erst stoppen" % name); return 4
     ctx = _snap_ctx(name)
     if not ctx:
         audit("[restore:%s] steht in keiner Registry" % name); return 5
@@ -682,11 +682,11 @@ def cmd_delete_world(st, name, wid):
     if len(ids) <= 1:
         audit("[delete-world:%s] ABGELEHNT: '%s' ist die letzte Welt" % (name, wid)); return 4
     if wid == active:
-        audit("[delete-world:%s] ABGELEHNT: '%s' ist die aktive Welt — erst wechseln" % (name, wid)); return 4
+        audit("[delete-world:%s] ABGELEHNT: '%s' ist die aktive Welt, erst wechseln" % (name, wid)); return 4
     # Abschieds-Snapshot (best-effort: Welt kann nie gestartet worden sein)
     snap_rc = cmd_snapshot(name, world=wid, prefix="deleted")
     if snap_rc == 1:
-        audit("[delete-world:%s] kein Abschieds-Snapshot (keine Welt-Dateien?) — fahre fort" % name)
+        audit("[delete-world:%s] kein Abschieds-Snapshot (keine Welt-Dateien?), fahre fort" % name)
     # Welt-Dateien am Spiel-Ort loeschen (nur world_items, nie die geteilten items)
     spec = _save_spec(name) or {}
     items = [_expand_world(p, wid) for p in (spec.get("world_items") or [])]
@@ -694,7 +694,7 @@ def cmd_delete_world(st, name, wid):
         ctx = _snap_ctx(name) or {}
         rmcmd = "cd %s 2>/dev/null && rm -rf %s" % (spec["parent"], " ".join(items))
         if not ctx:
-            audit("[delete-world:%s] steht in keiner Registry — Dateien bleiben liegen" % name)
+            audit("[delete-world:%s] steht in keiner Registry, Dateien bleiben liegen" % name)
         elif not game_is_lxc(ctx):
             run("sh -c '%s; true'" % rmcmd, timeout=120)
         elif _lxc_running(ctx["ctid"]):
@@ -775,7 +775,7 @@ def audit_status(st, slot, key, msg):
 # Status las, sah 'MC soll laufen', obwohl der Node bewusst idle war.
 # game_idle_since/game_unused_since/game_was_used waren die Einzahl-Uhren aus der Zeit, in der
 # genau EIN Spiel laufen durfte. Seit dem Mehr-Spiel-Umbau (2026-08-22) fuehrt st["games"] je
-# Spiel seine eigenen — die alten Schluessel wandern in der Migration mit und verschwinden dann.
+# Spiel seine eigenen, die alten Schluessel wandern in der Migration mit und verschwinden dann.
 _DEAD_STATE_KEYS = ("want_mc", "autooff_tried", "dayz_was_used", "dayz_idle_since",
                     "game_idle_since", "game_unused_since", "game_was_used")
 
@@ -827,7 +827,7 @@ def game_geschuetzt(st, name):
 
     Nicht zu verwechseln mit reserve_game()/reserved_games(): die bedeuten 'der Arbiter
     verwaltet diese Rolle gerade' (sie steht im Slot) und sagen nichts darueber aus, ob sie
-    geschuetzt ist. Der Schutz ist ein ausdruecklicher Schalter, den ein Admin setzt —
+    geschuetzt ist. Der Schutz ist ein ausdruecklicher Schalter, den ein Admin setzt,
     im Dashboard 'Reserviert', beim Windows-Lab und den Lab-Diensten 'Wartungsmodus'.
     Er ueberlebt einen Neustart des Arbiters, weil er in state.json steht."""
     return bool((game_slot(st, name) or {}).get("geschuetzt"))
@@ -836,12 +836,12 @@ def status_schutz_nachziehen(st):
 
     status.json schreibt sonst allein der Tick (emit_state). Nach einem
     Reservieren-Kommando haette die Oberflaeche deshalb bis zu 60 s den alten
-    Zustand gezeigt und ihren Knopf falsch herum beschriftet — der Nutzer klickt
+    Zustand gezeigt und ihren Knopf falsch herum beschriftet, der Nutzer klickt
     dann ein zweites Mal und hebt auf, was er gerade gesetzt hat.
 
     Bewusst KEIN vollstaendiger Tick an dieser Stelle: der wuerde nebenbei
     Auto-Off und Verdraengung ausfuehren. Ein Schalter darf nichts starten oder
-    stoppen. Fehlt die Datei, passiert nichts — der naechste Tick baut sie neu.
+    stoppen. Fehlt die Datei, passiert nichts, der naechste Tick baut sie neu.
     """
     try:
         with open(STATUS_FILE) as f:
@@ -857,7 +857,7 @@ def status_schutz_nachziehen(st):
 
 def set_game_geschuetzt(st, name, an):
     """Schutz setzen/aufheben. Legt den Slot NICHT an: geschuetzt wird, was laeuft bzw. beim
-    naechsten Tick startet — ein Schutz fuer ein gar nicht verwaltetes Spiel waere eine
+    naechsten Tick startet, ein Schutz fuer ein gar nicht verwaltetes Spiel waere eine
     stille Karteileiche, die reserved_games() ohnehin herausfiltert."""
     slot = game_slot(st, name)
     if slot is None:
@@ -867,7 +867,7 @@ def set_game_geschuetzt(st, name, an):
     return True
 def reserved_games(st):
     """Reservierte Spiele in Registry-Reihenfolge. Filtert Eintraege heraus, deren Spiel
-    aus games.json entfernt wurde — sonst haelt ein Karteileichen-Eintrag ewig RAM-Buchhaltung."""
+    aus games.json entfernt wurde, sonst haelt ein Karteileichen-Eintrag ewig RAM-Buchhaltung."""
     return [n for n in game_names() if n in (st.get("games") or {})]
 # --- Wartung: dieses Spiel startet gerade bewusst nicht -------------------------
 # Gegenstueck zum Schutz oben und bewusst NICHT im Spiel-Slot gefuehrt: den Slot gibt es
@@ -1062,7 +1062,7 @@ def precheck_mc(avail):
 # kind: lxc-systemd | lxc-docker  -> das Spiel steckt in einem Proxmox-LXC (Node .18)
 #       systemd                   -> das Spiel laeuft host-nativ neben dem Arbiter (Spiele-VPS)
 # _in() ist der EINZIGE Ort, der das unterscheidet. Ohne diese Weiche muesste jede der ueber
-# 40 pct-Stellen es einzeln wissen — und eine vergessene liefe auf dem VPS ins Leere, wo es
+# 40 pct-Stellen es einzeln wissen, und eine vergessene liefe auf dem VPS ins Leere, wo es
 # gar kein pct gibt (rc=127, aussieht wie 'Spiel aus').
 def game_is_lxc(g):
     return str((g or {}).get("kind", "lxc-systemd")).startswith("lxc-")
@@ -1188,7 +1188,7 @@ def probe_counts_players(g):
     return g.get("probe", {}).get("type") in ("a2s", "tcp-conn", "rcon", "rcon-cli")
 def game_reachable(g):
     """Readiness (nur up/down, KEINE Spielerzahl): True, sobald der Server tatsaechlich joinbar
-    ist — d.h. der Query/Port antwortet. Anders als game_players() (echte Spielerzahl); hier
+    ist: d.h. der Query/Port antwortet. Anders als game_players() (echte Spielerzahl); hier
     zaehlt nur 'antwortet der Server ueberhaupt schon'. Basis fuer den Discord-Ladebalken
     ('wann ist er da'): a2s/rcon -> Reply erhalten; tcp/tcp-conn -> Port lauscht."""
     p = g.get("probe", {}); t = p.get("type")
@@ -1296,7 +1296,7 @@ def game_start(g, world=None):
         # jeweiligen Game-Repo, validiert die ID selbst nochmal).
         # ★ world_script ist NICHT kosmetisch: auf Node .18 wohnte jedes Spiel in einem
         # eigenen LXC, weshalb ein fester Pfad je Spiel genau ein Skript traf. Auf gamehost
-        # laufen alle host-nativ nebeneinander — dort haette ein zweites multi_world-Spiel
+        # laufen alle host-nativ nebeneinander, dort haette ein zweites multi_world-Spiel
         # ueber denselben Pfad Terrarias Skript aufgerufen und dessen serverconfig.txt
         # ueberschrieben. Default bleibt der alte Pfad (Terraria/.18 unveraendert).
         w = world or world_info(g["name"])[0] or DEFAULT_WORLD
@@ -1373,7 +1373,7 @@ def _shutdown_lxc(ctid, label):
     return False
 def blocking_role(st, exclude_kind=None, exclude_name=None):
     """EIN Ort fuer 'wer hat gerade Vorrang?'. Gibt die schwere Rolle zurueck, die den Start einer
-    NEUEN schweren Rolle blockiert — oder None (Node frei). Vorrang haben BELEGTE Rollen (ein Game
+    NEUEN schweren Rolle blockiert, oder None (Node frei). Vorrang haben BELEGTE Rollen (ein Game
     oder MC mit >0 Spielern), RESERVIERTE Games und ein RESERVIERTES Win-Lab (bewusster Wunsch).
     Leere, ungeschuetzte Rollen blockieren NICHT -> sie weichen dem Neustart.
     exclude_kind/-name = die startende Rolle selbst (blockt sich nicht). Genutzt von cmd_start_game,
@@ -1401,11 +1401,11 @@ def role_label(r):
     return r["name"] + (" mit %d Spieler(n)" % r["players"] if r.get("players", 0) > 0 else "")
 
 def absage_grund(r):
-    """Warum diese Rolle den Start blockiert — im Klartext, wie er beim Menschen ankommt.
+    """Warum diese Rolle den Start blockiert, im Klartext, wie er beim Menschen ankommt.
 
     Zwei verschiedene Gruende teilten sich frueher eine Meldung: 'dort wird gespielt' und
     'das ist reserviert' sind aber nicht dasselbe. Beim reservierten Lab hilft Warten nicht
-    unbedingt — dort muss jemand den Wartungsmodus beenden. Wer nur 'ABGELEHNT' liest,
+    unbedingt, dort muss jemand den Wartungsmodus beenden. Wer nur 'ABGELEHNT' liest,
     sucht sonst nach einem Schalter, den es nicht mehr gibt."""
     if r.get("kind") == "lab":
         return ("das Windows-Lab ist im Wartungsmodus reserviert. Es bleibt geschuetzt, "
@@ -1417,7 +1417,7 @@ def absage_grund(r):
 
 # ---------- rich Live-Snapshot fuer P4 (MQTT/Panel) ----------
 def publish_mqtt(snap):
-    """Publisht den Live-Snapshot retained nach MQTT — NUR wenn /opt/game-arbiter/mqtt.env
+    """Publisht den Live-Snapshot retained nach MQTT, NUR wenn /opt/game-arbiter/mqtt.env
     existiert (MQTT_HOST/PORT/USER/PW/CAFILE/TOPIC). Ohne Datei = No-op (dormant bis Owner
     den Mosquitto-User anlegt + Creds hinterlegt). Fehler werden geschluckt (best-effort)."""
     envf = BASE + "/mqtt.env"
@@ -1448,13 +1448,13 @@ def publish_mqtt(snap):
                          "ts": snap.get("ts"), "restart_count": snap.get("restart_count")}), False)
 
 def _erreichbar(name, gemessene_spieler):
-    """Antwortet dieses Spiel schon — oder bootet es noch? (True/False/None=unbekannt)
+    """Antwortet dieses Spiel schon, oder bootet es noch? (True/False/None=unbekannt)
 
     ★ Die gemessene Spielerzahl allein reicht dafuer NICHT, und das haengt an der Probenart:
       a2s / rcon    eine Zahl >= 0 setzt eine echte Antwort voraus -> beweist Erreichbarkeit.
       tcp-conn      zaehlt bestehende Verbindungen. Ein Server, der noch gar nicht lauscht,
                     hat ebenso null davon wie ein laufender, auf dem niemand spielt. 0 beweist
-                    hier also nichts — gemessen an Terraria sah ein frisch gestarteter Server
+                    hier also nichts: gemessen an Terraria sah ein frisch gestarteter Server
                     schon in der ersten Sekunde aus wie "laeuft, komm rein", waehrend er in
                     Wahrheit noch minutenlang seine Welt erzeugte.
     Nur in diesem mehrdeutigen Fall wird zusaetzlich gefragt, ob der Port ueberhaupt lauscht.
@@ -1477,7 +1477,7 @@ def emit_state(st, lab, ct, health, players, avail, gate_up=None, game_players_k
     mc_reserved = st.get("reservation") == "minecraft"
     _res = reserved_games(st)
     # 'reserved' bleibt ein einzelner Name: wake-bridge, Dashboard und Bot lesen ihn seit
-    # Monaten so. Die Wahrheit fuer mehrere Spiele steht daneben in reserved_all/detail —
+    # Monaten so. Die Wahrheit fuer mehrere Spiele steht daneben in reserved_all/detail,
     # additiv, damit ein alter Leser nichts falsch versteht statt zu brechen.
     _res_game = _res[0] if _res else None
     _spieler = dict(game_players_known or {})
@@ -1494,7 +1494,7 @@ def emit_state(st, lab, ct, health, players, avail, gate_up=None, game_players_k
                       "unused_since": slot.get("unused_since"), "was_used": bool(slot.get("was_used")),
                       "world": slot.get("world"), "players": (_p if (_p is not None and _p >= 0) else None),
                       # "erreichbar" trennt zwei Zustaende, die players=null bisher zusammenwarf:
-                      # "gefragt, keine Antwort" (der Server bootet noch — DayZ braucht 2-3 min)
+                      # "gefragt, keine Antwort" (der Server bootet noch: DayZ braucht 2-3 min)
                       # und "antwortet, gerade leer". Fuer die Oberflaeche ist das der Unterschied
                       # zwischen "startet gerade" und "laeuft, komm rein"; wer nur players liest,
                       # zeigt beides als laufend an und schickt Spieler in einen Timeout.
@@ -1502,7 +1502,7 @@ def emit_state(st, lab, ct, health, players, avail, gate_up=None, game_players_k
                       "erreichbar": _erreichbar(n, _spieler.get(n)),
                       # "geschuetzt" = im Dashboard 'Reserviert': kein Auto-Off, nicht verdraengbar.
                       # Ohne dieses Feld koennte die Oberflaeche einen Schutz anbieten, dessen
-                      # Zustand sie nicht kennt — und den Knopf falsch herum beschriften.
+                      # Zustand sie nicht kennt, und den Knopf falsch herum beschriften.
                       "geschuetzt": game_geschuetzt(st, n)}
     _active_players = _detail.get(_res_game, {}).get("players") if _res_game else None
     snap = {
@@ -1526,7 +1526,7 @@ def emit_state(st, lab, ct, health, players, avail, gate_up=None, game_players_k
                              for n in game_names() if game_multi_world(n)},
                   # Was jedes Spiel braucht, um starten zu duerfen. Steht hier, damit eine
                   # Oberflaeche VOR dem Klick sagen kann "dafuer reicht der Speicher gerade
-                  # nicht" statt den Nutzer in eine Absage laufen zu lassen — und zwar mit
+                  # nicht" statt den Nutzer in eine Absage laufen zu lassen, und zwar mit
                   # DEN Zahlen, gegen die precheck_game() wirklich prueft. Wer sie stattdessen
                   # im Dashboard nachpflegt, fuehrt eine zweite Wahrheit, die beim naechsten
                   # ram_mb-Nachmessen still falsch wird.
@@ -1675,7 +1675,7 @@ def tick(st, confirm_evict, confirm_hard):
 
     # Rollen, die es an diesem Ort gar nicht gibt (Spiele-VPS: kein Minecraft, kein Win-Lab),
     # werden nicht gefragt. Ohne diese Weiche liefe jeder Tick in ein fehlendes pct/qm und
-    # meldete 'absent'/'[]' — richtig geraten, aber teuer erkauft und irrefuehrend im Log.
+    # meldete 'absent'/'[]': richtig geraten, aber teuer erkauft und irrefuehrend im Log.
     mc_on, lab_on = has_role("minecraft"), has_role("lab")
     gate_up = ensure_gate() if has_role("mc_gate") else None
     lab = lab_running() if lab_on else []
@@ -1830,7 +1830,7 @@ def tick(st, confirm_evict, confirm_hard):
             gp = game_players(g) if probe_counts_players(g) else -1
             if gp > 0:
                 # SICHERHEITSGURT: ein besetztes Spiel wird nie abgeraeumt. Frueher stoppte
-                # dieser Zweig bedingungslos alles Unreservierte — auf einem Host, auf dem
+                # dieser Zweig bedingungslos alles Unreservierte, auf einem Host, auf dem
                 # Spiele auch von Hand oder beim Systemstart hochkommen, wirft das Spieler
                 # mitten aus der Partie. Stattdessen uebernimmt der Arbiter es.
                 audit("[game:%s] laeuft mit %d Spieler(n) ohne Reservierung -> uebernommen statt gestoppt" % (gn, gp))
@@ -1918,7 +1918,7 @@ def tick(st, confirm_evict, confirm_hard):
         uto = g.get("unused_timeout_s", DEFAULT_UNUSED_TIMEOUT_S)
         if game_geschuetzt(st, gn):
             # Reserviert: kein Auto-Off, egal wie lange leer. Die Uhren werden dabei
-            # ZURUECKGESETZT statt nur uebersprungen — sonst stuende beim Freigeben eine
+            # ZURUECKGESETZT statt nur uebersprungen, sonst stuende beim Freigeben eine
             # abgelaufene idle_since im Slot und das Spiel ginge im selben Tick aus, in dem
             # der Schutz faellt. Wer freigibt, erwartet die volle Frist, nicht das Fallbeil.
             slot["idle_since"] = None; slot["unused_since"] = None
@@ -1981,19 +1981,19 @@ def tick(st, confirm_evict, confirm_hard):
 
 # ---------- Lab-Lebenszyklus-Kommandos ----------
 def cmd_start_lab(st, reserve):
-    """Lab starten. Zwei Modi — der Unterschied ist der SCHUTZ, nicht mehr das Erzwingen:
+    """Lab starten. Zwei Modi, der Unterschied ist der SCHUTZ, nicht mehr das Erzwingen:
        reserve=False (--start-lab): laeuft UNRESERVIERT -> Idle-Auto-Off nach 45min ohne Sitzung.
        reserve=True  (--start-lab --reserve, im dev-portal 'Wartungsmodus'): reservation=lab ->
            kein Auto-Off und keine Verdraengung, solange reserviert.
 
     Beide pruefen zuerst, ob eine belegte Rolle Vorrang hat. Bis zum 2026-08-23 war --reserve
-    der Erzwingen-Modus: er stoppte laufende Spiele, um Platz zu machen. Das ist entfallen —
+    der Erzwingen-Modus: er stoppte laufende Spiele, um Platz zu machen. Das ist entfallen:
     ein Wartungsmodus ist eine Ansage fuer die Zukunft ('das hier bitte nicht abraeumen'),
     kein Freibrief, anderen den laufenden Betrieb zu nehmen."""
     lab_now = lab_running()
     block = blocking_role(st, exclude_kind="lab")
     if block:
-        audit("[start-lab] ABGELEHNT: %s hat Vorrang — %s" % (role_label(block), absage_grund(block)))
+        audit("[start-lab] ABGELEHNT: %s hat Vorrang, %s" % (role_label(block), absage_grund(block)))
         return
     st["reservation"] = "lab" if reserve else "none"
     for g in GAMES:                  # leere Spiele weichen dem Lab (belegte gibt es hier nicht mehr)
@@ -2030,14 +2030,14 @@ def cmd_stop_lab(st):
 
 # ---------- Minecraft als on-demand-Rolle (gleichrangig zu den Games) ----------
 def cmd_wake_mc(st):
-    """MC wecken + reservieren — symmetrisch zu cmd_start_game, nur mit MC-eigenen Start-/Sensor-
+    """MC wecken + reservieren: symmetrisch zu cmd_start_game, nur mit MC-eigenen Start-/Sensor-
     Funktionen (mc_start/mc_ct_state; das Paper-Backend hat eine eigene Health-/Crash-Maschine).
     Eine BELEGTE Rolle (Game/MC mit Spielern ODER reserviertes Lab) hat Vorrang -> ABGELEHNT.
     LEERE Rollen weichen. Setzt reservation=minecraft, verdraengt Lab + laufende Games graceful,
     Precheck-RAM, dann mc_start. Rueckgabe: 'started'|'rejected'|'no-ram'."""
     block = blocking_role(st, exclude_kind="mc")
     if block:
-        audit("[wake-mc] ABGELEHNT: %s hat Vorrang — %s" % (role_label(block), absage_grund(block)))
+        audit("[wake-mc] ABGELEHNT: %s hat Vorrang, %s" % (role_label(block), absage_grund(block)))
         return "rejected"
     st["reservation"] = "minecraft"
     lab = lab_running()
@@ -2074,12 +2074,12 @@ def cmd_sleep_mc(st):
 
 # ---------- Generische Game-Lebenszyklus-Kommandos ----------
 def _evict_for_ram(st, g, avail):
-    """Platz schaffen fuer <g>, indem LEERE, UNGESCHUETZTE Rollen weichen — laengste Leerzeit
+    """Platz schaffen fuer <g>, indem LEERE, UNGESCHUETZTE Rollen weichen: laengste Leerzeit
     zuerst, damit das am ehesten Vergessene zuerst geht. Belegte Rollen bleiben unangetastet,
     ausnahmslos. Gibt den geschaetzten freien Speicher danach zurueck.
 
     Das ersetzt die alte Regel 'beim Start eines Spiels weichen ALLE anderen'. Die stammte
-    daher, dass auf .18 ohnehin nur eines ins RAM passte — auf dem Spiele-VPS haette sie
+    daher, dass auf .18 ohnehin nur eines ins RAM passte, auf dem Spiele-VPS haette sie
     laufende Partien beendet, obwohl reichlich Platz ist."""
     brauch = g.get("min_free_mb", 4000)
     kandidaten = []
@@ -2089,18 +2089,18 @@ def _evict_for_ram(st, g, avail):
         if not other or not game_active(other): continue
         if game_players(other) > 0: continue          # belegt -> bleibt
         if game_geschuetzt(st, n):
-            # Reserviert (im Lab: Wartungsmodus) — jemand hat ausdruecklich gesagt, dass diese
+            # Reserviert (im Lab: Wartungsmodus), jemand hat ausdruecklich gesagt, dass diese
             # Rolle stehenbleiben soll, auch wenn gerade niemand darauf ist. Genau dafuer gibt
             # es den Schalter: sonst muesste man waehrend der Arbeit dauernd jemanden joinen
             # lassen, damit einem der Server nicht unter den Haenden weggeraeumt wird.
             audit("[start-game:%s] '%s' ist reserviert -> weicht nicht" % (g["name"], n))
             continue
         if int(other.get("idle_timeout_s", 0)) == 0:
-            # idle_timeout_s=0 heisst "immer-online" — kein Auto-Off, also auch keine
+            # idle_timeout_s=0 heisst "immer-online", kein Auto-Off, also auch keine
             # Verdraengung (der Auto-Off-Zweig respektierte das seit jeher, der
             # Verdraengungspfad nicht: am 2026-08-22 opferte er prompt DayZ, weil gerade
             # niemand darauf spielte). Seit dem 2026-08-23 nutzt KEIN Spiel mehr diese
-            # Markierung — DayZ hat einen Platzhalter bekommen und ist on-demand. Der
+            # Markierung: DayZ hat einen Platzhalter bekommen und ist on-demand. Der
             # Mechanismus bleibt fuer den Fall, dass wieder eines dauerhaft laufen soll.
             audit("[start-game:%s] '%s' ist als immer-online markiert -> weicht nicht" % (g["name"], n))
             continue
@@ -2119,7 +2119,7 @@ def cmd_start_game(st, name, world=None):
     """Game starten. Seit 2026-08-22 duerfen mehrere gleichzeitig laufen: reicht der freie
     Speicher, weicht NIEMAND. Erst wenn er nicht reicht, weichen LEERE, ungeschuetzte Rollen
     (leere Spiele, schlafendes MC, unreserviertes Lab). Eine BELEGTE Rolle beendet den Versuch
-    mit einer Absage — es gibt keinen Override (s. Kopf).
+    mit einer Absage, es gibt keinen Override (s. Kopf).
     world (nur multi_world-Games): gewuenschte Welt; laeuft das Game bereits mit einer ANDEREN
     Welt, wird der Start abgelehnt (Wechsel = stop -> wake --world, Admin-Pfad).
     Rueckgabe (fuer wake-bridge/Discord): 'started'|'already-running'|'rejected'|'no-ram'|'unknown'|'bad-world'."""
@@ -2143,19 +2143,19 @@ def cmd_start_game(st, name, world=None):
             audit("[start-game:%s] ABGELEHNT: unbekannte Welt '%s' (bekannt: %s)" % (name, world, ids)); return "bad-world"
         if game_active(g) and world != active:
             # Ein Welt-Wechsel im laufenden Betrieb wuerde die aktuelle Partie beenden. Das ist
-            # ein Stopp, kein Start — und Stoppen ist ein eigener, bewusster Schritt.
+            # ein Stopp, kein Start, und Stoppen ist ein eigener, bewusster Schritt.
             audit("[start-game:%s] ABGELEHNT: laeuft bereits mit Welt '%s'. Wechsel auf '%s' = erst stoppen, "
                   "dann mit der neuen Welt starten (Admin)." % (name, active, world))
             return "rejected"
     if game_active(g) and (world is None or world == world_info(name)[0]):
-        # Schon oben. Der Bot ruft /wake auch dann, wenn jemand nur nachsehen will — ein
+        # Schon oben. Der Bot ruft /wake auch dann, wenn jemand nur nachsehen will, ein
         # Neustart waere hier das Gegenteil dessen, was gemeint ist.
         reserve_game(st, name)
         audit("[start-game:%s] laeuft bereits -> nichts zu tun (Reservierung bestaetigt)" % name)
         return "already-running"
     if has_role("lab") and st.get("reservation") == "lab":
         # Ein reserviertes Win-Lab ist eine ausdrueckliche Owner-Ansage ('nicht stoeren') und
-        # bleibt deshalb unabhaengig vom freien Speicher Vorrang — anders als ein leeres Spiel,
+        # bleibt deshalb unabhaengig vom freien Speicher Vorrang: anders als ein leeres Spiel,
         # das nur RAM belegt. Ohne diese Zeile koennte ein Spiel starten, solange die Lab-VMs
         # noch nicht laufen, und ihnen spaeter den Platz wegnehmen.
         audit("[start-game:%s] ABGELEHNT: das Windows-Lab ist im Wartungsmodus reserviert. "
@@ -2173,7 +2173,7 @@ def cmd_start_game(st, name, world=None):
                 # Hier endet der Versuch. Frueher stand an dieser Stelle der Hinweis auf
                 # --force; ihn zu entfernen ist der eigentliche Sinn dieser Aenderung: eine
                 # laufende Partie ist wichtiger als ein Startwunsch.
-                audit("[start-game:%s] ABGELEHNT: %dMB frei, %dMB noetig — %s hat Vorrang, %s"
+                audit("[start-game:%s] ABGELEHNT: %dMB frei, %dMB noetig, %s hat Vorrang, %s"
                       % (name, avail, g.get("min_free_mb", 4000), role_label(block), absage_grund(block)))
                 return "rejected"
             if has_role("minecraft") and mc_ct_state() == "running":
@@ -2194,7 +2194,7 @@ def cmd_start_game(st, name, world=None):
             gemessen = free_mb()
             avail = max(avail, gemessen) if gemessen >= 0 else avail
             if not DRY and avail < g.get("min_free_mb", 4000):
-                audit("[start-game:%s] ABGELEHNT: %dMB frei, %dMB noetig — %s %s"
+                audit("[start-game:%s] ABGELEHNT: %dMB frei, %dMB noetig, %s %s"
                       % (name, avail, g.get("min_free_mb", 4000), ABSAGE_KEIN_RAM, ABSAGE_NACHSATZ))
                 return "no-ram"
     if world is not None and not DRY:
@@ -2243,7 +2243,7 @@ def cmd_restart_game(st, name, world=None):
     cmd_start_game(st, name, world=world)
 
 def cmd_adopt(st):
-    """Alles, was gerade laeuft, in die Reservierung uebernehmen — ohne einen einzigen Start
+    """Alles, was gerade laeuft, in die Reservierung uebernehmen, ohne einen einzigen Start
     oder Stopp. Der Schritt, mit dem ein Arbiter einen Host uebernimmt, auf dem die Spiele
     schon von Hand laufen: ohne ihn haelt der erste Tick sie fuer Karteileichen und raeumt
     die leeren ab. was_used=True, damit die 20-Minuten-Uhr sofort greift statt der
@@ -2262,7 +2262,7 @@ def cmd_adopt(st):
     if uebernommen:
         audit("[adopt] uebernommen: %s" % ", ".join(uebernommen))
     else:
-        audit("[adopt] nichts Laufendes gefunden — keine Reservierung angelegt")
+        audit("[adopt] nichts Laufendes gefunden, keine Reservierung angelegt")
     return uebernommen
 
 def cmd_probe(name):
@@ -2295,9 +2295,9 @@ def main():
     if "--force" in sys.argv:
         # Bewusst eine laute Absage statt stillem Ignorieren: --force steckt moeglicherweise noch
         # in einem Skript, einer Notiz oder im Muskelgedaechtnis. Wer es benutzt, soll erfahren,
-        # dass es den Override nicht mehr gibt — nicht denken, er habe gewirkt.
+        # dass es den Override nicht mehr gibt, nicht denken, er habe gewirkt.
         print("--force gibt es nicht mehr: wer spielt, wird nicht verdraengt. Ohne das Flag "
-              "erneut aufrufen — leere, ungeschuetzte Rollen weichen weiterhin von selbst.",
+              "erneut aufrufen: leere, ungeschuetzte Rollen weichen weiterhin von selbst.",
               file=sys.stderr)
         sys.exit(2)
     os.makedirs(BASE, exist_ok=True)
@@ -2380,7 +2380,7 @@ def main():
         reserve_game(st, "dayz")
         save_state(st); audit("[cmd] dayz in den Slot eingetragen (Start beim naechsten Tick)"); return
     # Schutz an/aus ("Reservieren" im Dashboard, "Wartungsmodus" bei Lab-Diensten): das Spiel
-    # bleibt stehen, bis der Schutz faellt — kein Auto-Off, keine Verdraengung. Bewusst getrennt
+    # bleibt stehen, bis der Schutz faellt, kein Auto-Off, keine Verdraengung. Bewusst getrennt
     # von --reserve-game, das nur den Slot anlegt und damit einen Start ausloest.
     # Wartung an/aus: "dieses Spiel darf gerade nicht starten". Gedacht fuer Arbeit AM Spiel
     # (Update, Mods, Weltpflege) und damit das Gegenstueck zu --reservieren, das ein laufendes

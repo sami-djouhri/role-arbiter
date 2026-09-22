@@ -147,7 +147,7 @@ class H(BaseHTTPRequestHandler):
         # Windows-AD-Lab: /lab/start[?wartung=1] | /lab/stop | /lab/wartung?an=0|1
         # Bis 2026-08-23 bewusst NICHT exponiert, weil '--start-lab --reserve' damals der
         # Erzwingen-Modus war: ein Klick im Web haette laufende Spiele beendet. Dieser Modus
-        # ist entfallen — ein Lab-Start weicht heute nur leeren, ungeschuetzten Rollen und
+        # ist entfallen, ein Lab-Start weicht heute nur leeren, ungeschuetzten Rollen und
         # wird sonst abgelehnt (rc=0 mit ABGELEHNT-Zeile im Log). Damit ist der Weg
         # ungefaehrlich genug fuer einen Knopf im dev-portal.
         if len(parts) == 2 and parts[0] == "lab":
@@ -176,7 +176,7 @@ class H(BaseHTTPRequestHandler):
             label = str(body.get("label") or "").strip()[:40]
             extra = ["--world-label", label] if label else []
             return self._run("worlds/%s/create" % game, "--create-world", game, wid, *extra)
-        # Welt loeschen: /worlds/<game>/delete, Body JSON {"id"} — Arbiter schuetzt aktive/letzte
+        # Welt loeschen: /worlds/<game>/delete, Body JSON {"id"}, Arbiter schuetzt aktive/letzte
         # Welt (rc=4) und legt vorher einen 'deleted-'-Abschieds-Snapshot an.
         if len(parts) == 3 and parts[0] == "worlds" and parts[2] == "delete":
             game = parts[1]
@@ -199,7 +199,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "invalid world id (a-z0-9-, 3-24)"})
                 extra = ["--world", world]
             return self._run("snapshot/" + game, "--snapshot", game, *extra, timeout=600)
-        # Restore: /restore/<game>, Body JSON {"file"} — nur bei gestopptem Spiel (rc=4 sonst).
+        # Restore: /restore/<game>, Body JSON {"file"}, nur bei gestopptem Spiel (rc=4 sonst).
         if len(parts) == 2 and parts[0] == "restore":
             game = parts[1]
             if game not in known_games():
@@ -233,7 +233,7 @@ class H(BaseHTTPRequestHandler):
                 extra += ["--world", world]
             return self._run(parts[0] + "/" + game, flag, game, *extra)
         # Reservierung an/aus: /reservieren/<game> | /freigeben/<game>. Ein reserviertes Spiel
-        # geht nicht von selbst aus und wird nicht verdraengt — im Windows-Lab heisst dasselbe
+        # geht nicht von selbst aus und wird nicht verdraengt, im Windows-Lab heisst dasselbe
         # 'Wartungsmodus'. rc=3 = das Spiel wird gerade gar nicht verwaltet (laeuft nicht).
         if len(parts) == 2 and parts[0] in ("reservieren", "freigeben"):
             game = parts[1]

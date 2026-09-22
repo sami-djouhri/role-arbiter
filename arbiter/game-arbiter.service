@@ -1,5 +1,5 @@
 [Unit]
-Description=game-arbiter tick — Prioritaets-Controller (Spiele / Windows-Lab / Worker)
+Description=game-arbiter tick: Prioritaets-Controller (Spiele / Windows-Lab / Worker)
 After=pve-guests.service docker.service
 [Service]
 Type=oneshot
