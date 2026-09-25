@@ -127,5 +127,6 @@ compose files for the roles themselves. A script strips all of that, swaps
 internal addresses and paths for placeholders, and refuses to push unless two
 separate secret scanners come back clean.
 
-That is also why there is a single commit rather than the real history. The
-controller runs on my own node and gets maintained there.
+That is also why the real history stays behind: the public one begins at the first
+release and grows with each later one. The controller runs on my own node and gets
+maintained there.

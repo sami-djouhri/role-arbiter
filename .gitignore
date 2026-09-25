@@ -1,4 +1,4 @@
-# Secrets / Laufzeit-State — nie ins Git
+# Secrets / Laufzeit-State, nie ins Git
 .rcon
 *.pw
 .env

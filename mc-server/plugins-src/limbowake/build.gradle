@@ -1,4 +1,4 @@
-// LimboWake — kleines Velocity-4-Plugin: holt Spieler nahtlos aus dem NanoLimbo-Warteraum ins
+// LimboWake ist ein kleines Velocity-4-Plugin: es holt Spieler nahtlos aus dem NanoLimbo-Warteraum ins
 // on-demand Paper-Backend, sobald es hochgefahren ist. Keine Runtime-Deps (nur Velocity-API compileOnly)
 // -> plain 'gradle jar' reicht, kein shadow. Build via gradle:jdk21-Container im LXC (hat Internet).
 plugins { id 'java' }
