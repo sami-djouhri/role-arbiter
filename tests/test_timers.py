@@ -10,6 +10,12 @@ Aufruf:  python3 tests/test_timers.py
 """
 import importlib.util, json, os, sys, tempfile, time, unittest
 
+# Mehrere Tests setzen self.m.time.sleep = No-op. self.m.time ist das GLOBALE time-Modul,
+# der Eingriff blieb also nach dem Lauf stehen und liess in jedem spaeter geladenen
+# Testmodul jede Wartezeit ausfallen (gefunden 2026-10-04 an test_bridge_rechte).
+_ECHTES_SLEEP = time.sleep
+unittest.addModuleCleanup(lambda: setattr(time, "sleep", _ECHTES_SLEEP))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Laeuft sowohl im Repo (tests/ neben arbiter/) als auch auf dem Node (/opt/game-arbiter/tests/).
 ARBITER_PY = next(
@@ -38,6 +44,11 @@ def load_arbiter(tmpdir):
     # bricht damit die 6-Stunden-Kette von SpielDauerhaftNichtStartbar ab. Der Alarm wuerde
     # dann nie feuern, gerade weil jemand die Tests laufen laesst.
     m.METRICS_FILE = os.path.join(tmpdir, "spiele.prom")
+    # Platzhalter-Heilung ruft run()/act() direkt (systemctl is-active/start), und die
+    # ersetzt dieser Harness nicht. Ohne diese Zeile setzte ein Tick-Test mit greeter_service
+    # echte systemctl-Aufrufe auf dem Wirt ab, auf dem er laeuft. Getestet wird sie in
+    # test_heilung.py mit vollstaendigen Attrappen.
+    m.platzhalter_heilen = lambda st: None
     m.DRY = False
     # PROFILE wird beim Import aus /opt/game-arbiter/arbiter.json gelesen, auf einem Host ohne
     # Minecraft/Lab (Spiele-VPS) haetten die MC-/Lab-Tests sonst gegen ausgeschaltete Rollen

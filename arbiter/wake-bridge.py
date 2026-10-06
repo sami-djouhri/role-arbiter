@@ -25,12 +25,12 @@ Endpunkte:
                                          reserviert starten (kein Auto-Off, keine Verdraengung).
   POST /worlds/<game>/create  Bearer <token>, JSON {"id","label"}  -> Welt in der Registry anlegen
                                          (Dateien entstehen lazy beim ersten Start)
-  POST /worlds/<game>/delete  Bearer <token>, JSON {"id"}  -> Welt loeschen (Arbiter schuetzt
+  POST /worlds/<game>/delete  Bearer <OWNER-token>, JSON {"id"}  -> Welt loeschen (Arbiter schuetzt
                                          aktive/letzte Welt, macht vorher einen Abschieds-Snapshot)
-  POST /snapshot/<game>[?world=<id>]  Bearer <token>  -> Welt-Snapshot jetzt erstellen (manual/)
+  POST /snapshot/<game>[?world=<id>]  Bearer <token>  -> Welt-Snapshot jetzt (manuell/, 3 je Welt und Tag)
   POST /restore/<game>   Bearer <token>, JSON {"file"}  -> Snapshot zurueckspielen (nur bei
                                          gestopptem Spiel, rc=4 sonst; prerestore-Sicherung vorher)
-  POST /snapshots/<game>/delete  Bearer <token>, JSON {"file"}  -> Snapshot-Datei loeschen
+  POST /snapshots/<game>/delete  Bearer <OWNER-token>, JSON {"file"}  -> Snapshot-Datei loeschen
   GET  /status                        -> live status.json (kein Token noetig, read-only)
   GET  /worlds/<game>                 -> Welt-Registry eines Games (kein Token, read-only, live)
   GET  /snapshots/<game>              -> Snapshot-Liste (nightly+manual; kein Token, read-only)
@@ -39,7 +39,7 @@ Endpunkte:
 
 Env: WAKE_BIND (default 192.0.2.10), WAKE_PORT (default 8129), ARBITER (default /opt/game-arbiter/arbiter.py).
 """
-import json, os, re, subprocess, sys
+import hmac, json, os, re, subprocess, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -53,11 +53,17 @@ PORT    = int(os.environ.get("WAKE_PORT", "8129"))
 ARBITER = os.environ.get("ARBITER", "/opt/game-arbiter/arbiter.py")
 BASE    = os.path.dirname(ARBITER)
 TOKEN_FILE  = BASE + "/wake.token"
+# ★★ Zweites Token fuer den Owner (2026-10-04). Nur damit gibt es Loeschrechte (Sicherungen
+# und Welten) und die Befreiung von den Tageslimits. Das normale Token tragen Dashboard
+# UND Greenleaf-Bot; wer es hat, soll Sicherungen anlegen und einspielen koennen, aber
+# keine zerstoeren. Fehlt die Datei, kann ueber die Bridge niemand loeschen.
+OWNER_TOKEN_FILE = BASE + "/wake.owner.token"
+WER_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,40}$")
 STATUS_FILE = BASE + "/status.json"
 
-def load_token():
+def load_token(pfad=None):
     try:
-        with open(TOKEN_FILE) as f: return f.read().strip()
+        with open(pfad or TOKEN_FILE) as f: return f.read().strip()
     except Exception: return None
 
 def known_games():
@@ -76,11 +82,25 @@ class H(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionError):
             pass   # Client weg (z.B. terraria-greeter, den der ausgeloeste Wake selbst stoppte) -> Antwort verpufft, ok
     def log_message(self, *a): pass   # kein Request-Spam ins journal
-    def _authed(self):
-        tok = load_token()
-        if not tok: return False
+    def _rolle(self):
+        """'owner', 'admin' oder None, je nach vorgelegtem Token."""
         h = self.headers.get("Authorization", "")
-        return h == "Bearer " + tok
+        owner_tok = load_token(OWNER_TOKEN_FILE)
+        if owner_tok and hmac.compare_digest(h, "Bearer " + owner_tok):
+            return "owner"
+        tok = load_token()
+        if tok and hmac.compare_digest(h, "Bearer " + tok):
+            return "admin"
+        return None
+    def _authed(self):
+        return self._rolle() is not None
+    def _wer(self):
+        """Wer die Aktion ausloest (X-Wer vom Dashboard), fuer audit.log und created_by.
+        Nur Zeichen aus WER_RE, alles andere faellt auf 'bridge' zurueck."""
+        w = (self.headers.get("X-Wer") or "").strip()
+        return w if WER_RE.match(w) else "bridge"
+    def _owner_flags(self):
+        return ["--owner"] if self._rolle() == "owner" else []
     def do_GET(self):
         if self.path == "/status":
             try:
@@ -175,10 +195,13 @@ class H(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "invalid world id (a-z0-9-, 3-24)"})
             label = str(body.get("label") or "").strip()[:40]
             extra = ["--world-label", label] if label else []
+            extra += ["--wer", self._wer()] + self._owner_flags()
             return self._run("worlds/%s/create" % game, "--create-world", game, wid, *extra)
         # Welt loeschen: /worlds/<game>/delete, Body JSON {"id"}, Arbiter schuetzt aktive/letzte
         # Welt (rc=4) und legt vorher einen 'deleted-'-Abschieds-Snapshot an.
         if len(parts) == 3 and parts[0] == "worlds" and parts[2] == "delete":
+            if self._rolle() != "owner":
+                return self._send(403, {"error": "Welten loescht nur der Owner"})
             game = parts[1]
             if game not in known_games():
                 return self._send(400, {"error": "unknown game", "known": known_games()})
@@ -186,8 +209,9 @@ class H(BaseHTTPRequestHandler):
             wid = str((body or {}).get("id") or "").strip()
             if not WORLD_ID_RE.match(wid):
                 return self._send(400, {"error": "invalid world id (a-z0-9-, 3-24)"})
-            return self._run("worlds/%s/delete" % game, "--delete-world", game, wid, timeout=300)
-        # Snapshot jetzt: /snapshot/<game>[?world=<id>] -> manual/<game>/<welt>-<ts>.tar.gz
+            return self._run("worlds/%s/delete" % game, "--delete-world", game, wid, "--owner",
+                             "--wer", self._wer(), timeout=300)
+        # Snapshot jetzt: /snapshot/<game>[?world=<id>] -> manuell/<game>/<welt>-<ts>.tar.gz
         if len(parts) == 2 and parts[0] == "snapshot":
             game = parts[1]
             if game not in known_games():
@@ -198,6 +222,7 @@ class H(BaseHTTPRequestHandler):
                 if not WORLD_ID_RE.match(world):
                     return self._send(400, {"error": "invalid world id (a-z0-9-, 3-24)"})
                 extra = ["--world", world]
+            extra += ["--wer", self._wer()] + self._owner_flags()
             return self._run("snapshot/" + game, "--snapshot", game, *extra, timeout=600)
         # Restore: /restore/<game>, Body JSON {"file"}, nur bei gestopptem Spiel (rc=4 sonst).
         if len(parts) == 2 and parts[0] == "restore":
@@ -208,9 +233,15 @@ class H(BaseHTTPRequestHandler):
             fn = str((body or {}).get("file") or "").strip()
             if ".." in fn or not SNAP_FILE_RE.match(fn):
                 return self._send(400, {"error": "invalid snapshot file"})
-            return self._run("restore/" + game, "--restore", game, fn, timeout=600)
+            # ?laufend=1: auch bei laufendem Server, mit Ansage im Spiel (60 s + 10 s).
+            laufend = parse_qs(parsed.query).get("laufend", ["0"])[0] in ("1", "true", "yes")
+            extra = ["--laufend"] if laufend else []
+            return self._run("restore/" + game, "--restore", game, fn, "--wer", self._wer(), *extra,
+                             timeout=600)
         # Snapshot loeschen: /snapshots/<game>/delete, Body JSON {"file"}
         if len(parts) == 3 and parts[0] == "snapshots" and parts[2] == "delete":
+            if self._rolle() != "owner":
+                return self._send(403, {"error": "Sicherungen loescht nur der Owner"})
             game = parts[1]
             if game not in known_games():
                 return self._send(400, {"error": "unknown game", "known": known_games()})
@@ -218,7 +249,8 @@ class H(BaseHTTPRequestHandler):
             fn = str((body or {}).get("file") or "").strip()
             if ".." in fn or not SNAP_FILE_RE.match(fn):
                 return self._send(400, {"error": "invalid snapshot file"})
-            return self._run("snapshots/%s/delete" % game, "--delete-snapshot", game, fn)
+            return self._run("snapshots/%s/delete" % game, "--delete-snapshot", game, fn, "--owner",
+                             "--wer", self._wer())
         # Games: /wake/<game>[?world=..] | /sleep/<game> | /restart/<game>[?world=..]
         if len(parts) == 2 and parts[0] in ("wake", "sleep", "restart"):
             game = parts[1]

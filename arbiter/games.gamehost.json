@@ -32,6 +32,9 @@
         "user": "dayz",
         "dir": "/home/dayz/dayz-server",
         "hinweis": "App 223350 laedt nicht anonym: SteamCMD verlangt ein Konto, das DayZ besitzt, samt Steam-Guard-Code. Das ist kein Hindernis, das ein Werkzeug umgehen kann, sondern ein Schritt, den ein Mensch einmal tun muss. Bis dahin bleibt der Server auf seinem Build stehen, und wer mit aktuellem Client beitreten will, wird abgewiesen."
+      },
+      "ansage": {
+        "_note": "Kein Konsolenkanal (Valheim: keine Konsole; DayZ: kein RCON eingerichtet). Bei Heilung und Einspielen wird nur gespeichert und neu gestartet."
       }
     },
     {
@@ -80,7 +83,7 @@
       },
       "update": {
         "kind": "manuell",
-        "hinweis": "tModLoader kommt nicht ueber SteamCMD (kein appmanifest) und hat keine Versions-API. Sein Stand haengt an der Mod-Liste und wird beim Mod-Pflegen mitgezogen: /home/terraria/manage-tModLoaderServer.sh, danach mods-snapshot.sh. Zuletzt von Hand gemacht am 2026-09-01 (pre-tml-update-20260901 daneben). Die MODS dagegen haben einen Weg: 'spiel-aktualisieren terraria --mods --live'.",
+        "hinweis": "tModLoader kommt nicht ueber SteamCMD (kein appmanifest) und hat keine Versions-API. Sein Stand haengt an der Mod-Liste und wird beim Mod-Pflegen mitgezogen: /home/terraria/manage-tModLoaderServer.sh, danach mods-snapshot.sh. Zuletzt von Hand gemacht am 2026-10-02 (pre-tml-update-20261002 daneben, davor 2026-09-01). Die MODS dagegen haben einen Weg: 'spiel-aktualisieren terraria --mods --live'.",
         "mods": {
           "kind": "workshop",
           "appid": 1281930,
@@ -91,6 +94,12 @@
           "acf": "/home/terraria/steamapps/workshop/appworkshop_1281930.acf",
           "_note": "tModLoader laedt seine Mods NICHT beim Serverstart nach, sondern nimmt den lokalen Workshop-Cache. Ohne diesen Weg altern sie still: gemessen am 2026-09-19 lag Recipe Browser 292 Tage zurueck. Geladen wird anonym (tModLoader ist frei), derselbe Aufruf, den manage-tModLoaderServer.sh benutzt. ★ Project Zomboid braucht das NICHT: sein Server prueft die WorkshopItems bei jedem Start selbst, weshalb dort auch nichts zurueckliegt."
         }
+      },
+      "ansage": {
+        "art": "fifo",
+        "pfad": "/home/terraria/server.in",
+        "befehl": "say {text}",
+        "_note": "Konsolen-Pipe, die start.sh mit 3<> offen haelt (seit 2026-10-04, vorher stdin=/dev/null)."
       }
     },
     {
@@ -120,6 +129,9 @@
         "user": "valheim",
         "steamcmd": "/home/valheim/steamcmd/steamcmd.sh",
         "dir": "/home/valheim/valheim-server"
+      },
+      "ansage": {
+        "_note": "Kein Konsolenkanal (Valheim: keine Konsole; DayZ: kein RCON eingerichtet). Bei Heilung und Einspielen wird nur gespeichert und neu gestartet."
       }
     },
     {
@@ -148,6 +160,11 @@
         "dir": "/home/factorio/factorio",
         "url": "https://factorio.com/get-download/stable/headless/linux64",
         "_note": "Factorio kommt nicht ueber Steam, sondern als tar.xz von factorio.com. Entpackt wird ueber das bestehende Verzeichnis: das Archiv bringt bin/ und data/ mit, waehrend saves/ und mods/ unberuehrt bleiben. Genau deshalb wird VOR dem Entpacken gesichert, nicht danach."
+      },
+      "ansage": {
+        "art": "rcon",
+        "befehl": "{text}",
+        "_note": "Text ohne Schraegstrich geht ueber RCON als Chatzeile an alle."
       }
     },
     {
@@ -197,6 +214,13 @@
           "sed -i 's/\"-Xmx8g\"/\"-Xmx3g\"/' /home/zomboid/pz-server/ProjectZomboid64.json"
         ],
         "_note_nach_update": "SteamCMD schreibt ProjectZomboid64.json bei jedem Update neu und setzt den Heap zurueck auf -Xmx8g. Bliebe das stehen, faende die JVM 8 GiB fuer sich in Ordnung, waehrend der Arbiter mit 5000 MB min_free rechnet: der Bedarf waere ploetzlich groesser als die Zahl, gegen die er Starts abwaegt. Der Nachsatz gehoert deshalb in den Update-Weg, nicht in eine Notiz."
+      },
+      "ansage": {
+        "art": "tmux",
+        "nutzer": "zomboid",
+        "socket": "zomboid",
+        "sitzung": "main",
+        "befehl": "servermsg \"{text}\""
       }
     },
     {
@@ -226,6 +250,13 @@
         "user": "avorion",
         "steamcmd": "/home/avorion/steamcmd/steamcmd.sh",
         "dir": "/home/avorion/avorion-server"
+      },
+      "ansage": {
+        "art": "tmux",
+        "nutzer": "avorion",
+        "socket": "avorion",
+        "sitzung": "main",
+        "befehl": "/say {text}"
       }
     },
     {
@@ -251,6 +282,11 @@
       "update": {
         "kind": "manuell",
         "hinweis": "Paper kommt nicht ueber Steam, sondern als Image-Tag in /opt/mc/docker-compose.yml (itzg/minecraft-server, VERSION/TYPE dort). Ein Update ist ein bewusster Sprung der Serverversion und betrifft Plugins und Welt zugleich: 'docker compose pull mc-poc' und neu hochziehen, nachdem die Plugins den Zielstand koennen. Velocity dazu passend in docker-compose.velocity.yml."
+      },
+      "ansage": {
+        "art": "docker-rcon",
+        "container": "mc-poc",
+        "befehl": "say {text}"
       }
     }
   ]

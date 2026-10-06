@@ -112,6 +112,16 @@ BOOT_RESERVE_S = 180
 # nicht gehalten. 90 s liegt sicher jenseits von systemds StartLimit-Fenster (5 Versuche
 # in 10 s) und unter zwei Tick-Abstaenden, faellt also nie zwischen zwei Durchlaeufe.
 START_QUITTUNG_S = 90
+# ★★ Selbstheilung (Owner-Vorgabe 2026-10-04): ein laufender Server, der nicht mehr antwortet,
+# wird angekuendigt und neu gestartet: "in 5 Minuten", dann "in 10 Sekunden", dann Stopp
+# (systemd beendet ihn nach TimeoutStopSec notfalls hart) und Start. Antwortet er dazwischen
+# wieder, faellt der Neustart aus. Je Spiel ueberschreibbar in games.json.
+START_FRIST_S = 600        # so lange gilt Schweigen nach einem Start als Hochfahren
+HAENGER_S = 300            # so lange muss er schweigen, bevor angekuendigt wird
+ANKUENDIGUNG_S = 300       # Vorwarnzeit im Spiel ("in 5 Minuten")
+PLATZHALTER_ABSTAND_S = 300
+EINSPIELEN_VORWARNUNG_S = 60
+ANSAGE_RE = re.compile(r"^[A-Za-z0-9 .,:!?()'-]{1,120}$")
 def backoff_s(fehler):
     """Abstand bis zum naechsten Startversuch nach <fehler> Fehlstarts in Folge.
 
@@ -193,19 +203,31 @@ def has_role(name):
         return bool(PROFILE["roles"].get("minecraft", False))   # ohne eigene Angabe: wie bisher
     return bool(wert)
 
-# --- On-Demand-Game-Registry (deklarativ via games.json; Fallback = eingebaut) ---
+# --- On-Demand-Game-Registry (deklarativ via games.json) ---
 # Jedes Game ist eine schwere Rolle, die MC+Lab verdraengt (reservation=<name>).
 # Neue Games -> games.json-Eintrag, kein Code. Wirkt beim naechsten Tick.
-_DEFAULT_GAMES = [{"name": "dayz", "kind": "lxc-systemd", "ctid": 204, "service": "dayz-server",
-                   "probe": {"type": "a2s", "ip": "192.0.2.10", "port": 27016},
-                   "min_free_mb": 4200, "idle_timeout_s": 0}]
+#
+# ★★ Es gibt KEINE eingebaute Vorgabe mehr (2026-10-04). Bis dahin fiel eine leere oder
+# unlesbare Registry auf DayZ in LXC 204 zurueck. Auf Node .18 ist die Registry seit dem
+# Umzug vom 22.08. absichtlich leer, und die Nummer 204 gehoert seit dem 23.08. dem
+# Monitoring-Gast `monitoring2`. Der Arbiter dort hielt damit den zweiten Beobachter fuer
+# einen DayZ-Server, meldete spiel_*{spiel="dayz"} doppelt neben gamehost und haette einen
+# Start- oder Verdraengungsbefehl an LXC 204 gerichtet. Eine leere Liste heisst jetzt
+# "keine Spiele"; eine unlesbare wird laut gemeldet, statt durch ein erfundenes Spiel
+# ersetzt zu werden.
 def load_games():
     try:
         with open(BASE + "/games.json") as fh:
             g = json.load(fh).get("games")
-            if isinstance(g, list) and g: return g
-    except Exception: pass
-    return _DEFAULT_GAMES
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        sys.stderr.write("games.json unlesbar, Registry leer: %s\n" % e)
+        return []
+    if not isinstance(g, list):
+        sys.stderr.write("games.json: 'games' ist keine Liste, Registry leer\n")
+        return []
+    return g
 GAMES = load_games()
 def game_names(): return [g["name"] for g in GAMES]
 def game_by_name(n):
@@ -262,6 +284,14 @@ def world_info(name):
     active = w.get("active") if w.get("active") in ids else ids[0]
     return active, ids
 
+def _welt_meta(name):
+    """Wer eine Welt wann angelegt hat, fuer die Anzeige. Alte Welten ohne Angabe fehlen."""
+    out = {}
+    for x in (load_worlds().get(name) or {}).get("worlds", []):
+        if x.get("id"):
+            out[x["id"]] = {"created": x.get("created"), "created_by": x.get("created_by")}
+    return out
+
 def set_active_world(name, world):
     w = load_worlds()
     entry = w.setdefault(name, {})
@@ -275,8 +305,21 @@ def set_active_world(name, world):
     save_worlds(w)
     return True
 
-def cmd_create_world(name, wid, label=None):
-    """Welt in der Registry anlegen (Dateien entstehen lazy beim ersten Start)."""
+def _heute():
+    return datetime.now().strftime("%Y-%m-%d")
+
+def neue_welten_rest(name):
+    """Wie viele Welten heute fuer dieses Spiel noch angelegt werden duerfen. Gezaehlt wird
+    am Anlage-Protokoll, nicht an der Weltliste: sonst setzte das Loeschen einer Welt das
+    Tageslimit zurueck."""
+    log = (load_worlds().get(name) or {}).get("angelegt", [])
+    heute = sum(1 for e in log if str(e.get("am", "")).startswith(_heute()))
+    return max(0, NEUE_WELTEN_JE_TAG - heute)
+
+def cmd_create_world(name, wid, label=None, wer=None, owner=False):
+    """Welt in der Registry anlegen (Dateien entstehen lazy beim ersten Start).
+    Hoechstens NEUE_WELTEN_JE_TAG je Spiel und Tag, fuer alle Admins zusammen; der Owner
+    ist davon ausgenommen. Wer und wann steht an der Welt und im Anlage-Protokoll."""
     if not game_multi_world(name):
         audit("[create-world] '%s' ist kein Multi-Welten-Game" % name); return "unknown"
     if not WORLD_ID_RE.match(wid or ""):
@@ -291,9 +334,17 @@ def cmd_create_world(name, wid, label=None):
         audit("[create-world:%s] Welt '%s' existiert bereits" % (name, wid)); return "exists"
     if len(worlds) >= MAX_WORLDS_PER_GAME:
         audit("[create-world:%s] ABGELEHNT: Cap %d Welten erreicht" % (name, MAX_WORLDS_PER_GAME)); return "cap"
-    worlds.append({"id": wid, "label": (label or wid.capitalize())[:40], "created": now()})
+    if not owner and neue_welten_rest(name) <= 0:
+        audit("[create-world:%s] ABGELEHNT: heute wurde schon %d neue Welt angelegt, morgen wieder"
+              % (name, NEUE_WELTEN_JE_TAG)); return "limit"
+    wer = wer if (wer and WER_RE.match(wer)) else "unbekannt"
+    worlds.append({"id": wid, "label": (label or wid.capitalize())[:40], "created": now(),
+                   "created_by": wer})
+    entry.setdefault("angelegt", []).append({"id": wid, "am": now(), "von": wer})
+    entry["angelegt"] = entry["angelegt"][-200:]
     save_worlds(w)
-    audit("[create-world:%s] Welt '%s' registriert (Dateien entstehen beim ersten Start)" % (name, wid))
+    audit("[create-world:%s] Welt '%s' registriert von %s (Dateien entstehen beim ersten Start)"
+          % (name, wid, wer))
     return "created"
 
 # --- Welt-Snapshots (/var/backups/game-saves, restic-gedeckt) -----------------
@@ -303,8 +354,28 @@ def cmd_create_world(name, wid, label=None):
 # Service-Autostarts): behebt zugleich, dass der alte Nightly-Hook gestoppte
 # LXCs uebersprang und die Tars seit dem LXC-Shutdown-Umbau einfroren.
 GS_DIR = "/var/backups/game-saves"
+# Alt-Layout bis 2026-10-04: ein Topf "manual/" fuer alles, Praefixe prerestore-/deleted-,
+# 5 je Welt. Wird von _toepfe_einsortieren() aufgeloest und nur noch gelesen.
 MANUAL_DIR = GS_DIR + "/manual"
-SNAP_KEEP_MANUAL = 5
+
+# ★★ Sicherungs-Toepfe (Owner-Vorgabe 2026-10-04). Jeder Topf rotiert fuer sich, keiner
+# kann einen anderen verdraengen. Das ist der Kern: ein Admin darf Sicherungen anlegen,
+# aber er darf mit ihnen nie die Tagesstaende hinausschieben, die garantieren, dass jede
+# Welt mindestens 60 Tage zurueckholbar ist.
+#   taeglich        der Nachtlauf, als Hardlink auf das feste Nightly-Archiv, NUR wenn
+#                   sich die Welt seit dem letzten Tagesstand geaendert hat. 60 Staende
+#                   decken damit mindestens 60 Tage, bei ruhenden Welten viel mehr.
+#   manuell         Admin-Sicherungen, hoechstens ADMIN_SICHERUNGEN_JE_TAG je Welt.
+#   vor-einspielen  automatische Sicherung vor jedem Zurueckspielen und jedem Update.
+#   geloescht       Abschiedsstand einer geloeschten Welt, GELOESCHT_TAGE lang.
+# Loeschen einzelner Dateien darf nur der Owner (--owner), in jedem Topf.
+TOEPFE = {"taeglich": 60, "manuell": 30, "vor-einspielen": 30, "geloescht": None}
+GELOESCHT_TAGE = 30
+ADMIN_SICHERUNGEN_JE_TAG = 3
+NEUE_WELTEN_JE_TAG = 1
+# Exit-Codes zusaetzlich zu 0/1/4/5: 6 = Tageslimit erreicht, 7 = nur der Owner darf das.
+RC_LIMIT, RC_NUR_OWNER = 6, 7
+WER_RE = re.compile(r"^[A-Za-z0-9_.:@-]{1,40}$")
 MC_SAVE = {"parent": "/opt/mc/data", "items": ["world", "world_nether", "world_the_end"]}
 
 def _save_spec(name):
@@ -458,27 +529,169 @@ def _snap_tar(ctx, parent, items, dest, check="", shrink_max_pct=None):
     except OSError: pass
     return False
 
-def _prune_manual(name, token):
-    """Manuelle Snapshots je Spiel+Welt-Prefix auf SNAP_KEEP_MANUAL begrenzen
-    (Timestamp im Namen -> lexikographisch = chronologisch)."""
-    d = os.path.join(MANUAL_DIR, name)
+def _topf_dateien(name, topf, token):
+    """Dateien eines Topfs fuer genau diese Welt, aelteste zuerst. ★ Exakter Abgleich auf
+    <token>-JJJJMMTT-HHMMSS.tar.gz: ein blosses startswith(token + "-") liess die Welt
+    'greenleaf' auch die Sicherungen von 'greenleaf-2' zaehlen und wegraeumen."""
+    d = os.path.join(GS_DIR, topf, name)
+    muster = re.compile(r"^%s-\d{8}-\d{6}\.tar\.gz$" % re.escape(token))
     try:
-        files = sorted(f for f in os.listdir(d)
-                       if f.startswith(token + "-") and f.endswith(".tar.gz"))
+        return sorted(f for f in os.listdir(d) if muster.match(f))
     except OSError:
+        return []
+
+def _topf_rotieren(name, topf, token):
+    """Haelt einen Topf auf seiner Obergrenze. Nur dieser Topf, nur diese Welt."""
+    keep = TOEPFE.get(topf)
+    if not keep:
         return
-    for f in files[:-SNAP_KEEP_MANUAL]:
+    d = os.path.join(GS_DIR, topf, name)
+    for f in _topf_dateien(name, topf, token)[:-keep]:
         try:
             os.remove(os.path.join(d, f))
-            audit("[snapshot:%s] Retention: %s entfernt (max. %d je Welt)" % (name, f, SNAP_KEEP_MANUAL))
+            audit("[snapshot:%s] Rotation %s: %s entfernt (max. %d je Welt)" % (name, topf, f, keep))
         except OSError:
             pass
 
-def cmd_snapshot(name, world=None, nightly=False, prefix=""):
-    """Welt-Snapshot. rc: 0 ok, 1 Fehler, 5 unbekannt/ungueltig.
-    nightly=True -> festes Ziel (GS/<game>[/<welt>].tar.gz, wird ueberschrieben);
-    sonst manual/<game>/<welt>-<ts>.tar.gz mit Retention. prefix markiert
-    Sonder-Snapshots (prerestore/deleted)."""
+def sicherungen_heute(name, token):
+    """Admin-Sicherungen dieser Welt mit dem heutigen Datum im Namen."""
+    tag = datetime.now().strftime("%Y%m%d")
+    return sum(1 for f in _topf_dateien(name, "manuell", token) if f[len(token) + 1:].startswith(tag))
+
+def _tar_signatur(pfad):
+    """Fingerabdruck des Archiv-INHALTS: Name, Typ und SHA-256 jeder Datei. Das gz selbst
+    taugt nicht als Vergleich (dieselben Dateien ergeben nicht byte-gleiche Archive), und
+    die mtime auch nicht: Terrarias pre_cmd beruehrte bei jedem Lauf sein Manifest, und
+    jede unbespielte Welt galt damit als geaendert (gemessen 2026-10-04)."""
+    import hashlib, tarfile
+    h = hashlib.sha256()
+    with tarfile.open(pfad, "r:gz") as tf:
+        eintraege = []
+        for m in tf:
+            if m.isfile():
+                f = tf.extractfile(m)
+                inhalt = hashlib.sha256()
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    inhalt.update(block)
+                eintraege.append("%s|f|%s" % (m.name, inhalt.hexdigest()))
+            else:
+                eintraege.append("%s|%s" % (m.name, m.type))
+        for e in sorted(eintraege):
+            h.update((e + "\n").encode())
+    return h.hexdigest()
+
+def _tagesstand(name, token, quelle):
+    """Nach einem erfolgreichen Nachtlauf: datierter Tagesstand als Hardlink, aber nur
+    wenn sich die Welt seit dem letzten geaendert hat. ★ Traegt nur, weil _snap_tar das
+    feste Archiv per os.replace ersetzt (neue Inode); schriebe es in place, aenderten sich
+    alle verlinkten Tagesstaende mit. Ein Test haelt das fest."""
+    d = os.path.join(GS_DIR, "taeglich", name)
+    os.makedirs(d, exist_ok=True)
+    sigdatei = os.path.join(d, ".signaturen.json")
+    try:
+        with open(sigdatei) as fh: sigs = json.load(fh)
+    except Exception:
+        sigs = {}
+    try:
+        sig = _tar_signatur(quelle)
+    except Exception as e:
+        audit("[tagesstand:%s] Signatur nicht lesbar (%s), Tagesstand trotzdem angelegt" % (name, e))
+        sig = None
+    vorhanden = _topf_dateien(name, "taeglich", token)
+    if sig and vorhanden and sigs.get(vorhanden[-1]) == sig:
+        return False
+    ziel = os.path.join(d, "%s-%s.tar.gz" % (token, datetime.now().strftime("%Y%m%d-%H%M%S")))
+    try:
+        os.link(quelle, ziel)
+    except OSError:
+        import shutil
+        shutil.copy2(quelle, ziel)
+    if sig:
+        sigs[os.path.basename(ziel)] = sig
+    _topf_rotieren(name, "taeglich", token)
+    bleibt = set(os.listdir(d))
+    sigs = {k: v for k, v in sigs.items() if k in bleibt}
+    tmp = sigdatei + ".tmp"
+    with open(tmp, "w") as fh: json.dump(sigs, fh)
+    os.replace(tmp, sigdatei)
+    audit("[tagesstand:%s] %s angelegt" % (name, os.path.relpath(ziel, GS_DIR)))
+    return True
+
+def _geloescht_aufraeumen():
+    """Abschiedsstaende geloeschter Welten nach GELOESCHT_TAGE entfernen. Das Alter steht
+    im Dateinamen, nicht in der mtime (die aendert ein Kopieren)."""
+    grenze = (datetime.now().timestamp() - GELOESCHT_TAGE * 86400)
+    basis = os.path.join(GS_DIR, "geloescht")
+    try:
+        spiele = os.listdir(basis)
+    except OSError:
+        return
+    for sp in spiele:
+        d = os.path.join(basis, sp)
+        try:
+            dateien = os.listdir(d)
+        except OSError:
+            continue
+        for f in dateien:
+            m = re.search(r"-(\d{8}-\d{6})\.tar\.gz$", f)
+            if not m:
+                continue
+            try:
+                alter = datetime.strptime(m.group(1), "%Y%m%d-%H%M%S").timestamp()
+            except ValueError:
+                continue
+            if alter < grenze:
+                try:
+                    os.remove(os.path.join(d, f))
+                    audit("[geloescht:%s] %s nach %d Tagen entfernt" % (sp, f, GELOESCHT_TAGE))
+                except OSError:
+                    pass
+
+def _toepfe_einsortieren():
+    """Alt-Layout manual/ in die Toepfe verteilen (idempotent): prerestore-* nach
+    vor-einspielen/, deleted-* nach geloescht/, der Rest nach manuell/. Der Praefix faellt
+    dabei weg, der Topf sagt jetzt, was es ist."""
+    try:
+        spiele = os.listdir(MANUAL_DIR)
+    except OSError:
+        return 0
+    n = 0
+    for sp in spiele:
+        d = os.path.join(MANUAL_DIR, sp)
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if not f.endswith(".tar.gz"):
+                continue
+            topf, neu = "manuell", f
+            for praefix, ziel in (("prerestore-", "vor-einspielen"), ("deleted-", "geloescht")):
+                if f.startswith(praefix):
+                    topf, neu = ziel, f[len(praefix):]
+            zd = os.path.join(GS_DIR, topf, sp)
+            os.makedirs(zd, exist_ok=True)
+            if not os.path.exists(os.path.join(zd, neu)):
+                os.rename(os.path.join(d, f), os.path.join(zd, neu))
+                n += 1
+        try:
+            os.rmdir(d)
+        except OSError:
+            pass
+    try:
+        os.rmdir(MANUAL_DIR)
+    except OSError:
+        pass
+    if n:
+        audit("[toepfe] %d Sicherungen aus manual/ einsortiert" % n)
+    return n
+
+def cmd_snapshot(name, world=None, nightly=False, topf="manuell", owner=False):
+    """Welt-Snapshot. rc: 0 ok, 1 Fehler, 5 unbekannt/ungueltig, 6 Tageslimit.
+    nightly=True -> festes Ziel (GS/<game>[/<welt>].tar.gz, per os.replace ersetzt) plus
+    Tagesstand in taeglich/, wenn sich die Welt geaendert hat; sonst <topf>/<game>/
+    <welt>-<ts>.tar.gz mit Rotation je Topf. Im Topf 'manuell' gilt das Tageslimit fuer
+    Admins; der Owner und die automatischen Toepfe sind davon ausgenommen."""
+    if topf not in TOEPFE or topf == "taeglich":
+        audit("[snapshot] unbekannter Topf '%s'" % topf); return 5
     spec = _save_spec(name)
     if not spec:
         audit("[snapshot] kein save-Spec fuer '%s'" % name); return 5
@@ -494,14 +707,19 @@ def cmd_snapshot(name, world=None, nightly=False, prefix=""):
         token = world
         items = _snapshot_items(name, world)
         dest = (os.path.join(GS_DIR, name, world + ".tar.gz") if nightly else
-                os.path.join(MANUAL_DIR, name, "%s%s-%s.tar.gz" % (prefix and prefix + "-", token, ts)))
+                os.path.join(GS_DIR, topf, name, "%s-%s.tar.gz" % (token, ts)))
     else:
         if world:
             audit("[snapshot:%s] hat keine Multi-Welten" % name); return 5
         token = name
         items = _snapshot_items(name)
         dest = (os.path.join(GS_DIR, name + ".tar.gz") if nightly else
-                os.path.join(MANUAL_DIR, name, "%s%s-%s.tar.gz" % (prefix and prefix + "-", token, ts)))
+                os.path.join(GS_DIR, topf, name, "%s-%s.tar.gz" % (token, ts)))
+    if not nightly and topf == "manuell" and not owner \
+            and sicherungen_heute(name, token) >= ADMIN_SICHERUNGEN_JE_TAG:
+        audit("[snapshot:%s] ABGELEHNT: fuer '%s' gibt es heute schon %d Sicherungen, morgen wieder"
+              % (name, token, ADMIN_SICHERUNGEN_JE_TAG))
+        return RC_LIMIT
     _snap_pre_cmd(ctx, spec)
     # Schrumpf-Schutz nur beim Nightly-Lauf: nur dort wird ein festes Ziel ueberschrieben.
     # Manuelle Snapshots tragen einen Timestamp im Namen und verdraengen nichts.
@@ -511,8 +729,10 @@ def cmd_snapshot(name, world=None, nightly=False, prefix=""):
     if ok:
         sz = run("du -h '%s' | cut -f1" % dest)[1]
         audit("[snapshot:%s] %s ok (%s)" % (name, os.path.relpath(dest, GS_DIR), sz))
-        if not nightly:
-            _prune_manual(name, (prefix and prefix + "-") + token)
+        if nightly:
+            _tagesstand(name, token, dest)
+        else:
+            _topf_rotieren(name, topf, token)
         return 0
     audit("[snapshot:%s] FEHLGESCHLAGEN (%s), vorheriger Stand (falls vorhanden) bleibt"
           % (name, os.path.relpath(dest, GS_DIR)))
@@ -521,7 +741,12 @@ def cmd_snapshot(name, world=None, nightly=False, prefix=""):
 def cmd_snapshot_all():
     """Nightly-Lauf (restic-Pre-Hook): alle Games, bei multi_world jede Welt.
     Fehlertolerant (rc immer 0), je Game bleibt der letzte gute Stand liegen."""
-    for name in ["minecraft"] + game_names():
+    _toepfe_einsortieren()
+    _geloescht_aufraeumen()
+    # Eindeutig machen: auf gamehost steht minecraft selbst in der Registry, die Liste
+    # enthielt es dann zweimal und jedes Nightly archivierte die Welt doppelt (gemessen
+    # 2026-10-04: erste und letzte Zeile jedes Laufs).
+    for name in dict.fromkeys(["minecraft"] + game_names()):
         if not _save_spec(name):
             continue
         if game_multi_world(name):
@@ -562,7 +787,8 @@ def _valid_snapfile(name, relfile):
         return None
     ok = (relfile == name + ".tar.gz"
           or relfile.startswith(name + "/")
-          or relfile.startswith("manual/" + name + "/"))
+          or relfile.startswith("manual/" + name + "/")
+          or any(relfile.startswith(t + "/" + name + "/") for t in TOEPFE))
     if not ok:
         return None
     p = os.path.join(GS_DIR, relfile)
@@ -590,13 +816,28 @@ def cmd_list_snapshots(name):
             pass
     else:
         add(name + ".tar.gz", "nightly", name)
-    md = os.path.join(MANUAL_DIR, name)
+    for topf in TOEPFE:
+        td = os.path.join(GS_DIR, topf, name)
+        try:
+            for f in sorted(os.listdir(td), reverse=True):
+                if f.endswith(".tar.gz"):
+                    add(topf + "/" + name + "/" + f, topf, _world_from_fname(f, ids))
+        except OSError:
+            pass
+    md = os.path.join(MANUAL_DIR, name)     # Alt-Layout, bis zum naechsten Nachtlauf
     try:
         for f in sorted(os.listdir(md), reverse=True):
             if f.endswith(".tar.gz"):
                 add("manual/" + name + "/" + f, "manual", _world_from_fname(f, ids))
     except OSError:
         pass
+    # Restzaehler fuer die Oberflaeche. Die Grenze setzt der Arbiter selbst durch, das hier
+    # ist nur die Anzeige dazu.
+    tokens = ids if game_multi_world(name) else [name]
+    out["heute_rest"] = {t: max(0, ADMIN_SICHERUNGEN_JE_TAG - sicherungen_heute(name, t)) for t in tokens}
+    out["neue_welten_rest"] = neue_welten_rest(name) if game_multi_world(name) else 0
+    out["toepfe"] = {t: TOEPFE[t] for t in TOEPFE}
+    out["geloescht_tage"] = GELOESCHT_TAGE
     return out
 
 def _game_running(name):
@@ -605,18 +846,41 @@ def _game_running(name):
     g = game_by_name(name)
     return bool(g and game_active(g))
 
-def cmd_restore(st, name, relfile):
-    """Snapshot zurueckspielen. NUR bei gestopptem, unreserviertem Spiel; legt
-    IMMER erst einen prerestore-Sicherheits-Snapshot an. rc: 0 ok, 1 Fehler,
-    4 Spiel laeuft/reserviert, 5 Datei/Game unbekannt."""
+def cmd_restore(st, name, relfile, laufend=False):
+    """Snapshot zurueckspielen; legt IMMER erst eine Sicherung des Stands davor in
+    vor-einspielen/ an. rc: 0 ok, 1 Fehler, 4 Spiel laeuft/reserviert, 5 unbekannt.
+
+    laufend=True (Owner-Vorgabe 2026-10-04, "auch mit Spielern, nach Warnung"): laeuft der
+    Server, bekommen die Spieler EINSPIELEN_VORWARNUNG_S vorher eine Ansage und 10 s vorher
+    eine zweite; dann wird gespeichert und gestoppt, eingespielt und mit derselben Welt
+    wieder gestartet. Der Befehl haelt dabei die Arbiter-Sperre, der Tick kann das Spiel
+    also nicht mitten im Einspielen wieder hochziehen. Ohne laufend bleibt es beim
+    bisherigen Verhalten: bei laufendem Spiel rc 4."""
     spec = _save_spec(name)
     if not spec:
         audit("[restore:%s] kein save-Spec" % name); return 5
     src = _valid_snapfile(name, relfile)
     if not src:
         audit("[restore:%s] ungueltige Datei '%s'" % (name, relfile)); return 5
+    neu_starten = False
     if _game_running(name) or game_reserved(st, name) or st.get("reservation") == name:
-        audit("[restore:%s] ABGELEHNT: Spiel laeuft oder ist reserviert, erst stoppen" % name); return 4
+        g = game_by_name(name)
+        if not laufend or not g or mc_sonderrolle(name):
+            audit("[restore:%s] ABGELEHNT: Spiel laeuft oder ist reserviert, erst stoppen" % name); return 4
+        if _game_running(name):
+            vor = EINSPIELEN_VORWARNUNG_S
+            ankuendigen(g, "Die Welt wird in %d Sekunden auf einen frueheren Stand zurueckgesetzt" % vor)
+            if not DRY: time.sleep(max(0, vor - 10))
+            ankuendigen(g, "Zuruecksetzen in 10 Sekunden, bitte gleich neu verbinden")
+            if not DRY: time.sleep(10)
+            audit("[restore:%s] laufender Server: angekuendigt, jetzt speichern und stoppen" % name)
+            if not game_stop(g):
+                audit("[restore:%s] ABGEBROCHEN: Server liess sich nicht stoppen" % name); return 1
+            neu_starten = True
+            # Mit der Welt neu starten, die LIEF, nicht mit der eingespielten: wer bei laufender
+            # Welt A einen Stand von Welt B einspielt, will A nicht verlassen. Gestoppt wird
+            # trotzdem, weil das Archiv auch geteilte Dateien traegt (Mods, serverconfig).
+            welt_vorher = world_info(name)[0]
     ctx = _snap_ctx(name)
     if not ctx:
         audit("[restore:%s] steht in keiner Registry" % name); return 5
@@ -624,9 +888,9 @@ def cmd_restore(st, name, relfile):
     world = _world_from_fname(os.path.basename(relfile), ids) if game_multi_world(name) else None
     # Sicherheits-Snapshot des aktuellen Stands (best-effort: Welt kann leer sein)
     if game_multi_world(name) and world in ids:
-        cmd_snapshot(name, world=world, prefix="prerestore")
+        cmd_snapshot(name, world=world, topf="vor-einspielen")
     elif not game_multi_world(name):
-        cmd_snapshot(name, prefix="prerestore")
+        cmd_snapshot(name, topf="vor-einspielen")
     parent = spec["parent"]
     # chown auf den Eigentuemer des parent-Verzeichnisses normalisiert die
     # Ownership unabhaengig davon, in welchem Namespace das Tar entstand
@@ -654,11 +918,21 @@ def cmd_restore(st, name, relfile):
         entry.setdefault("worlds", []).append({"id": world, "label": world.capitalize(), "created": now()})
         save_worlds(w)
         audit("[restore:%s] Welt '%s' wieder registriert" % (name, world))
-    audit("[restore:%s] %s eingespielt (Sicherheits-Snapshot: prerestore-*)" % (name, relfile))
+    audit("[restore:%s] %s eingespielt (Sicherung des Stands davor: vor-einspielen/)" % (name, relfile))
+    if neu_starten:
+        g = game_by_name(name)
+        game_start(g, world=welt_vorher)
+        slot = game_slot(st, name)
+        if slot is not None:
+            slot["since"] = time.time(); slot["start_versuch"] = time.time()
+        audit("[restore:%s] Server mit eingespieltem Stand wieder gestartet" % name)
     return 0
 
-def cmd_delete_snapshot(name, relfile):
-    """Snapshot-Datei loeschen. rc: 0 ok, 5 unbekannt/ungueltig."""
+def cmd_delete_snapshot(name, relfile, owner=False):
+    """Snapshot-Datei loeschen, NUR der Owner. rc: 0 ok, 5 unbekannt/ungueltig, 7 kein Owner."""
+    if not owner:
+        audit("[delete-snapshot:%s] ABGELEHNT: Sicherungen loescht nur der Owner" % name)
+        return RC_NUR_OWNER
     src = _valid_snapfile(name, relfile)
     if not src:
         audit("[delete-snapshot:%s] ungueltige Datei '%s'" % (name, relfile)); return 5
@@ -669,11 +943,14 @@ def cmd_delete_snapshot(name, relfile):
     audit("[delete-snapshot:%s] %s geloescht" % (name, relfile))
     return 0
 
-def cmd_delete_world(st, name, wid):
+def cmd_delete_world(st, name, wid, owner=False):
     """Welt komplett entfernen (Registry + Dateien + Nightly-Tar). Vorher ein
-    letzter 'deleted-'-Snapshot nach manual/ (Wiederherstellung via --restore
+    letzter Stand nach geloescht/, GELOESCHT_TAGE lang (Wiederherstellung via --restore
     moeglich). Aktive Welt und letzte Welt sind geschuetzt.
-    rc: 0 ok, 4 aktiv/letzte, 5 unbekannt, 1 Fehler."""
+    rc: 0 ok, 4 aktiv/letzte, 5 unbekannt, 1 Fehler, 7 kein Owner."""
+    if not owner:
+        audit("[delete-world:%s] ABGELEHNT: Welten loescht nur der Owner" % name)
+        return RC_NUR_OWNER
     if not game_multi_world(name):
         audit("[delete-world:%s] kein Multi-Welten-Game" % name); return 5
     active, ids = world_info(name)
@@ -684,7 +961,7 @@ def cmd_delete_world(st, name, wid):
     if wid == active:
         audit("[delete-world:%s] ABGELEHNT: '%s' ist die aktive Welt, erst wechseln" % (name, wid)); return 4
     # Abschieds-Snapshot (best-effort: Welt kann nie gestartet worden sein)
-    snap_rc = cmd_snapshot(name, world=wid, prefix="deleted")
+    snap_rc = cmd_snapshot(name, world=wid, topf="geloescht")
     if snap_rc == 1:
         audit("[delete-world:%s] kein Abschieds-Snapshot (keine Welt-Dateien?), fahre fort" % name)
     # Welt-Dateien am Spiel-Ort loeschen (nur world_items, nie die geteilten items)
@@ -719,7 +996,8 @@ def cmd_delete_world(st, name, wid):
         remaining = [x.get("id") for x in entry["worlds"] if x.get("id")]
         entry["active"] = remaining[0] if remaining else DEFAULT_WORLD
     save_worlds(w)
-    audit("[delete-world:%s] Welt '%s' entfernt (Abschieds-Snapshot unter manual/, --restore holt sie zurueck)" % (name, wid))
+    audit("[delete-world:%s] Welt '%s' entfernt (Abschiedsstand unter geloescht/, %d Tage per --restore zurueckholbar)"
+          % (name, wid, GELOESCHT_TAGE))
     return 0
 
 def now(): return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1103,6 +1381,44 @@ def _tcp_conn_count(g, port):
     rc, out, _ = run(_in(g, "ss -Htn state established '( sport = :%s )'" % port))
     if rc != 0: return -1
     return sum(1 for line in out.splitlines() if line.strip())
+def _rcon_befehl(g, ip, port, befehl):
+    """Einen Befehl per Source-RCON schicken (Factorio). Antworttext oder None bei Fehler.
+    Passwort wie bei der Probe zur Laufzeit aus /etc/factorio/rcon.env am Spiel-Host."""
+    import socket, struct
+    rc, out, _ = run(_in(g, "sh -c 'set -a; . /etc/factorio/rcon.env 2>/dev/null; printf %s \"$RCON_PASSWORD\"'"))
+    if rc != 0 or not out.strip(): return None
+    s = None
+    try:
+        def _send(sock, rid, typ, body):
+            payload = struct.pack('<ii', rid, typ) + body.encode() + b'\x00\x00'
+            sock.sendall(struct.pack('<i', len(payload)) + payload)
+        def _recv(sock):
+            raw = b''
+            while len(raw) < 4:
+                ch = sock.recv(4 - len(raw))
+                if not ch: return None
+                raw += ch
+            n = struct.unpack('<i', raw)[0]; body = b''
+            while len(body) < n:
+                ch = sock.recv(n - len(body))
+                if not ch: return None
+                body += ch
+            rid, typ = struct.unpack('<ii', body[:8])
+            return rid, typ, body[8:-2].decode(errors="replace")
+        s = socket.create_connection((ip, port), timeout=5)
+        _send(s, 1, 3, out.strip())
+        r = _recv(s)
+        if not r or r[0] == -1: return None
+        _send(s, 2, 2, befehl)
+        r = _recv(s)
+        return r[2] if r else None
+    except Exception:
+        return None
+    finally:
+        if s:
+            try: s.close()
+            except Exception: pass
+
 def _rcon_players(g, ip, port):
     """Factorio: echte Spielerzahl via Source-RCON '/players online'. RCON-PW wird zur Laufzeit aus
     /etc/factorio/rcon.env am Spiel-Host gelesen (nie im Repo/games.json). -1 bei jedem Fehler (sicher)."""
@@ -1287,6 +1603,48 @@ def precheck_game(g, avail, st=None):
     if avail < 0: return True   # Sensorfehler -> nicht blockieren
     if st is not None: avail -= booting_reserve_mb(st, exclude=g.get("name"))
     return avail >= g.get("min_free_mb", 4000)
+def ankuendigen(g, text):
+    """Eine Zeile an alle im Spiel. True nur, wenn sie abgesetzt wurde.
+
+    Der Kanal steht je Spiel unter "ansage" in games.json:
+      fifo         Konsolen-Pipe (Terraria, start.sh haelt sie mit 3<> offen)
+      tmux         Konsole in tmux (Zomboid, Avorion), als Dienstnutzer
+      rcon         Source-RCON (Factorio), Passwort wie bei der Probe aus der env-Datei
+      docker-rcon  rcon-cli im Container (Minecraft)
+    Valheim und DayZ haben keinen: dort wird nur gespeichert und neu gestartet.
+    Der Text ist auf ASCII ohne Shell-Sonderzeichen beschraenkt (ANSAGE_RE), weil er in
+    eine Spielkonsole geht, die selbst wieder Befehle versteht. Jeder Weg laeuft mit
+    timeout: eine haengende Konsole darf den Tick nicht mitnehmen, und genau beim
+    Haenger ist das der Normalfall."""
+    import shlex
+    a = g.get("ansage") or {}
+    art = a.get("art")
+    if not art or not ANSAGE_RE.match(text or ""):
+        return False
+    zeile = (a.get("befehl") or "say {text}").replace("{text}", text)
+    if art == "fifo":
+        cmd = "timeout 5 sh -c %s _ %s %s" % (
+            shlex.quote('printf "%s\n" "$1" > "$2"'), shlex.quote(zeile), shlex.quote(a["pfad"]))
+    elif art == "tmux":
+        basis = "timeout 5 runuser -u %s -- tmux -L %s send-keys -t %s" % (
+            shlex.quote(a["nutzer"]), shlex.quote(a.get("socket", a["nutzer"])),
+            shlex.quote(a.get("sitzung", "main")))
+        cmd = "%s -l %s && %s Enter" % (basis, shlex.quote(zeile), basis)
+    elif art == "rcon":
+        p = g.get("probe", {})
+        return _rcon_befehl(g, p.get("ip", "127.0.0.1"), p["port"], zeile) is not None
+    elif art == "docker-rcon":
+        cmd = "timeout 10 docker exec %s rcon-cli %s" % (
+            shlex.quote(a.get("container") or g.get("container")), shlex.quote(zeile))
+    else:
+        return False
+    if DRY:
+        audit("[ansage:%s] DRY: %s" % (g["name"], text)); return True
+    rc, _, err = run(_in(g, cmd), timeout=20)
+    if rc != 0:
+        audit("[ansage:%s] nicht abgesetzt (rc=%s %s): %s" % (g["name"], rc, (err or "")[:80], text))
+    return rc == 0
+
 def game_start(g, world=None):
     if game_is_lxc(g) and not game_host_ready(g):
         act("Game '%s': LXC %d starten" % (g["name"], g["ctid"]), "pct start %d" % g["ctid"])
@@ -1522,7 +1880,8 @@ def emit_state(st, lab, ct, health, players, avail, gate_up=None, game_players_k
                   "idle_since": (_detail.get(_res_game) or {}).get("idle_since") if _res_game else None,
                   "unused_since": (_detail.get(_res_game) or {}).get("unused_since") if _res_game else None,
                   # Multi-Welten: je Game aktive Welt + Registry (nur Games mit multi_world)
-                  "worlds": {n: {"active": world_info(n)[0], "list": world_info(n)[1]}
+                  "worlds": {n: {"active": world_info(n)[0], "list": world_info(n)[1],
+                                 "meta": _welt_meta(n)}
                              for n in game_names() if game_multi_world(n)},
                   # Was jedes Spiel braucht, um starten zu duerfen. Steht hier, damit eine
                   # Oberflaeche VOR dem Klick sagen kann "dafuer reicht der Speicher gerade
@@ -1585,6 +1944,7 @@ def metriken_schreiben(snap, st):
         reserviert = (snap.get("ram") or {}).get("reserviert_startend_mb", 0)
         server, platz, weckbar, spieler, schutz, startbar, braucht = [], [], [], [], [], [], []
         kaputt, speicher, cpu, neustarts, fehlstarts, wartung = [], [], [], [], [], []
+        haengt, heilungen = [], []
         for g in GAMES:
             n = g["name"]
             # 'aktiv' bleibt game_active -- eine Quelle fuer diese Frage, im ganzen Modul.
@@ -1609,6 +1969,9 @@ def metriken_schreiben(snap, st):
                     cpu.append((n, "%.3f" % (lage["cpu_ns"] / 1e9)))
             fs = (game_slot(st, n) or {}).get("startfehler") or 0
             fehlstarts.append((n, int(fs)))
+            haengt.append((n, int(bool((game_slot(st, n) or {}).get("stumm_seit")))))
+            heilungen.append((n, sum(1 for t in ((st.get("heilungen") or {}).get(n) or [])
+                                     if time.time() - t < 86400)))
             p = (detail.get(n) or {}).get("players")
             if p is not None: spieler.append((n, int(p)))
             schutz.append((n, int(game_geschuetzt(st, n))))
@@ -1626,6 +1989,12 @@ def metriken_schreiben(snap, st):
         m("spiel_dienst_gescheitert",
           "Die Unit steht in 'failed' (1). Unterscheidet den kaputten Server vom schlafenden: "
           "beide sind 'nicht aktiv', aber nur einer kommt beim Wecken wieder hoch.", kaputt)
+        m("spiel_haengt",
+          "Der Server laeuft, antwortet aber nach der Startfrist nicht (1). Nach haenger_s "
+          "wird ein Neustart angekuendigt und ausgefuehrt.", haengt)
+        m("spiel_selbstheilungen_24h",
+          "Selbstheilungen dieses Spiels in den letzten 24 h (Neustart nach Haenger, Platzhalter "
+          "nachgestartet). Mehr als zwei sind kein Haenger mehr, sondern ein Defekt.", heilungen)
         m("spiel_startfehler_in_folge",
           "Wie oft der Arbiter dieses Spiel hintereinander vergeblich gestartet hat. 0 nach "
           "dem ersten Erfolg. Waechst der Wert, laeuft ein Weckversuch ins Leere.", fehlstarts)
@@ -1666,6 +2035,105 @@ def metriken_schreiben(snap, st):
         audit("[warn] Spiel-Metriken schreiben fehlgeschlagen: %s" % e)
 
 # ---------- Controller-Tick ----------
+def _haenger_pruefen(st, g, slot, gp):
+    """Selbstheilung eines laufenden, aber schweigenden Servers. True = der Tick soll fuer
+    dieses Spiel nichts weiter tun (Heilung laeuft oder ist gerade passiert).
+
+    ★ "Schweigen" heisst: die Probe bekommt keine Antwort (_erreichbar). Bei A2S und RCON
+    antwortet das Spiel selbst; bei Terraria (tcp-conn) heisst es nur "Port lauscht", eine
+    Spielschleife, die bei lebendem Listen-Thread haengt, sieht man so nicht.
+    Nicht geheilt wird in der Startfrist (ein bootender Server schweigt auch) und waehrend
+    einer Wartung (dann arbeitet jemand daran)."""
+    gn = g["name"]
+    jetzt = time.time()
+    if g.get("probe", {}).get("type") == "tcp":
+        antwortet = gp > 0                # reine tcp-Probe: 1 = Port offen, 0 = zu
+    else:
+        antwortet = _erreichbar(gn, gp)
+    h = slot.get("heilung")
+    if antwortet or antwortet is None:
+        if h or slot.get("stumm_seit"):
+            audit("[heilung:%s] Server antwortet wieder%s" % (
+                gn, " -> angekuendigter Neustart faellt aus" if h else ""))
+            if h and h.get("angekuendigt"):
+                ankuendigen(g, "Server antwortet wieder, kein Neustart")
+        slot["stumm_seit"] = None; slot["heilung"] = None
+        return False
+    if slot.get("since") and jetzt - slot["since"] < int(g.get("start_frist_s", START_FRIST_S)):
+        return False
+    if game_in_wartung(st, gn):
+        return False
+    if not slot.get("stumm_seit"):
+        slot["stumm_seit"] = jetzt
+        audit("[heilung:%s] Server laeuft, antwortet aber nicht -> beobachten" % gn)
+        return False
+    stumm = int(jetzt - slot["stumm_seit"])
+    if stumm < int(g.get("haenger_s", HAENGER_S)):
+        audit_status(st, "game", gn + ":stumm", "[heilung:%s] schweigt seit %ds" % (gn, stumm))
+        return True
+    vorwarnung = int(g.get("ankuendigung_s", ANKUENDIGUNG_S))
+    if not h:
+        gesendet = ankuendigen(g, "Server reagiert nicht und wird in %d Minuten neu gestartet"
+                               % max(1, vorwarnung // 60))
+        slot["heilung"] = {"seit": jetzt, "angekuendigt": gesendet}
+        audit("[heilung:%s] schweigt seit %ds -> Neustart in %ds angekuendigt (%s)"
+              % (gn, stumm, vorwarnung, "Ansage im Spiel" if gesendet else "ohne Ansage, kein Kanal"))
+        return True
+    if jetzt - h["seit"] < vorwarnung:
+        return True
+    if ankuendigen(g, "Neustart in 10 Sekunden") and not DRY:
+        time.sleep(10)
+    audit("[heilung:%s] Neustart nach %ds Schweigen (speichern, notfalls beendet systemd hart)" % (gn, stumm))
+    game_stop(g)
+    # Ein haengender Server reagiert nicht auf sein ExecStop; systemd beendet ihn erst nach
+    # TimeoutStopSec (bis 180 s) hart, game_stop selbst wartet nur 90 s. Ohne dieses Warten
+    # ginge der Start in einen noch laufenden Stopp.
+    if not DRY and not _warte_bis_inaktiv(g, 300):
+        audit("[heilung:%s] Unit steht nach 300 s noch nicht -> kein Start, naechster Tick versucht es" % gn)
+        return True
+    game_start(g, world=slot.get("world"))
+    slot["since"] = time.time(); slot["start_versuch"] = time.time()
+    slot["stumm_seit"] = None; slot["heilung"] = None
+    hl = st.setdefault("heilungen", {}).setdefault(gn, [])
+    hl.append(int(time.time())); del hl[:-50]
+    return True
+
+def _warte_bis_inaktiv(g, frist_s):
+    """Wartet, bis die Unit (bzw. der Container) des Spiels nicht mehr laeuft."""
+    ende = time.time() + frist_s
+    while time.time() < ende:
+        if not game_active(g):
+            return True
+        time.sleep(5)
+    return not game_active(g)
+
+def platzhalter_heilen(st):
+    """Ein schlafendes Spiel ohne laufenden Platzhalter ist fuer Spieler tot. Bisher wurde
+    das nur gemeldet (spiel_weckbar 0); jetzt startet der Arbiter den Platzhalter nach,
+    hoechstens alle PLATZHALTER_ABSTAND_S je Spiel, damit ein kaputter Platzhalter nicht im
+    Minutentakt Last erzeugt. Nicht waehrend einer Wartung und nicht, solange die Server-Unit
+    irgendetwas anderes tut als stillzustehen (Start, Stopp, Update)."""
+    for g in GAMES:
+        gs = g.get("greeter_service")
+        if not gs or g.get("kind", "") not in ("systemd",):
+            continue
+        gn = g["name"]
+        if game_in_wartung(st, gn) or game_reserved(st, gn):
+            continue
+        _, srv, _ = run(_in(g, "systemctl is-active %s" % g["service"]))
+        if srv.strip() not in ("inactive", "failed"):
+            continue
+        if platzhalter_aktiv(g):
+            continue
+        zuletzt = (st.setdefault("platzhalter_versuch", {})).get(gn) or 0
+        if time.time() - zuletzt < PLATZHALTER_ABSTAND_S:
+            continue
+        st["platzhalter_versuch"][gn] = time.time()
+        if act("Game '%s': Platzhalter '%s' stand, Server schlaeft -> nachstarten" % (gn, gs),
+               _in(g, "systemctl start %s" % gs)):
+            hl = st.setdefault("heilungen", {}).setdefault(gn, [])
+            hl.append(int(time.time())); del hl[:-50]
+
 def tick(st, confirm_evict, confirm_hard):
     if st["mode"] == "FAILED":
         audit("[FAILED] eingefroren (restart_count=%d). Manueller --reset noetig." % st["restart_count"])
@@ -1916,6 +2384,9 @@ def tick(st, confirm_evict, confirm_hard):
             slot["startfehler"] = 0; slot["start_versuch"] = None; slot["naechster_versuch"] = 0
         gp = game_players(g); ito = g.get("idle_timeout_s", 0)
         uto = g.get("unused_timeout_s", DEFAULT_UNUSED_TIMEOUT_S)
+        if _haenger_pruefen(st, g, slot, gp):
+            res_game_players[gn] = gp
+            continue
         if game_geschuetzt(st, gn):
             # Reserviert: kein Auto-Off, egal wie lange leer. Die Uhren werden dabei
             # ZURUECKGESETZT statt nur uebersprungen, sonst stuende beim Freigeben eine
@@ -1976,6 +2447,8 @@ def tick(st, confirm_evict, confirm_hard):
         key = "%s|%s|%s|%s|%s|%s" % (new, eff, lab, ct, health, res)
         audit_status(st, "mode", key, "[%s] %s" % (new, snap))
     st["mode"] = new
+    if not DRY:
+        platzhalter_heilen(st)
     emit_state(st, lab, ct, health, players, avail, gate_up=gate_up, game_players_known=res_game_players)
     return st
 
@@ -2324,6 +2797,15 @@ def main():
     # --probe <game> ist rein lesend (Readiness-Snapshot) -> ebenfalls VOR dem flock, damit der
     # Discord-Ladebalken (pollt /ready/<game>) nicht mit einem laufenden Tick um den Lock kaempft.
     for i, a in enumerate(sys.argv):
+        if a == "--ansage" and i+2 < len(sys.argv):
+            # Eine Zeile an alle im Spiel (Kanal aus games.json "ansage"). Ohne Sperre wie
+            # --probe: kein Zustand, und eine Ansage soll nicht auf einen Tick warten.
+            g = game_by_name(sys.argv[i+1])
+            if not g: print("unbekanntes Spiel"); sys.exit(5)
+            if not _game_running(g["name"]): print("Server laeuft nicht"); sys.exit(4)
+            ok = ankuendigen(g, sys.argv[i+2])
+            print("abgesetzt" if ok else "nicht abgesetzt (kein Kanal, Text unzulaessig oder Konsole antwortet nicht)")
+            sys.exit(0 if ok else 1)
         if a == "--probe" and i+1 < len(sys.argv):
             print(json.dumps(cmd_probe(sys.argv[i+1]))); return
     # --list-snapshots <game> ist rein lesend (Dateisystem) -> ebenfalls VOR dem flock.
@@ -2341,7 +2823,8 @@ def main():
                   "--stop-game", "--sleep", "--restart-game", "--restart", "--reserve-game", "--evict-lab",
                   "--reservieren", "--freigeben", "--wartung-an", "--wartung-aus",
                   "--status", "--test-precheck", "--create-world",
-                  "--snapshot", "--snapshot-all", "--restore", "--delete-snapshot", "--delete-world"}
+                  "--snapshot", "--snapshot-all", "--restore", "--delete-snapshot", "--delete-world",
+                  "--toepfe-einsortieren"}
     is_command = any(a in _CMD_FLAGS for a in sys.argv)
     if is_command:
         deadline = time.time() + 45
@@ -2427,10 +2910,21 @@ def main():
     wlabel = None
     for i, a in enumerate(sys.argv):
         if a == "--world-label" and i+1 < len(sys.argv): wlabel = sys.argv[i+1]
+    # Wer hat es ausgeloest (Dashboard-Nutzer, cli:<name>, system:<werkzeug>) und darf er
+    # alles? --owner kommt von der Bridge nur mit dem Owner-Token; wer auf dem Wirt selbst
+    # als root arbeitet, setzt es von Hand.
+    wer, ist_owner, topf = None, "--owner" in sys.argv, "manuell"
+    for i, a in enumerate(sys.argv):
+        if a == "--wer" and i+1 < len(sys.argv) and WER_RE.match(sys.argv[i+1]): wer = sys.argv[i+1]
+        if a == "--topf" and i+1 < len(sys.argv): topf = sys.argv[i+1]
+    if "--toepfe-einsortieren" in sys.argv:
+        if DRY:
+            print("DRY-RUN: --toepfe-einsortieren braucht --live"); sys.exit(1)
+        print("%d einsortiert" % _toepfe_einsortieren()); return
     for i, a in enumerate(sys.argv):
         if a == "--create-world" and i+2 < len(sys.argv):
-            r = cmd_create_world(sys.argv[i+1], sys.argv[i+2], wlabel)
-            sys.exit(0 if r == "created" else 3)
+            r = cmd_create_world(sys.argv[i+1], sys.argv[i+2], wlabel, wer=wer or "cli", owner=ist_owner)
+            sys.exit(0 if r == "created" else (RC_LIMIT if r == "limit" else 3))
         if a in ("--start-game", "--wake") and i+1 < len(sys.argv):
             r = cmd_start_game(st, sys.argv[i+1], world=world); save_state(st)
             sys.exit(0 if r in START_ERFOLG else 3)
@@ -2456,13 +2950,17 @@ def main():
             sys.exit(cmd_snapshot_all())
         for i, a in enumerate(sys.argv):
             if a == "--snapshot" and i+1 < len(sys.argv):
-                sys.exit(cmd_snapshot(sys.argv[i+1], world=world))
+                if wer: audit("[snapshot:%s] ausgeloest von %s" % (sys.argv[i+1], wer))
+                sys.exit(cmd_snapshot(sys.argv[i+1], world=world, topf=topf, owner=ist_owner))
             if a == "--restore" and i+2 < len(sys.argv):
-                sys.exit(cmd_restore(st, sys.argv[i+1], sys.argv[i+2]))
+                if wer: audit("[restore:%s] ausgeloest von %s" % (sys.argv[i+1], wer))
+                rc = cmd_restore(st, sys.argv[i+1], sys.argv[i+2], laufend="--laufend" in sys.argv)
+                save_state(st)
+                sys.exit(rc)
             if a == "--delete-snapshot" and i+2 < len(sys.argv):
-                sys.exit(cmd_delete_snapshot(sys.argv[i+1], sys.argv[i+2]))
+                sys.exit(cmd_delete_snapshot(sys.argv[i+1], sys.argv[i+2], owner=ist_owner))
             if a == "--delete-world" and i+2 < len(sys.argv):
-                sys.exit(cmd_delete_world(st, sys.argv[i+1], sys.argv[i+2]))
+                sys.exit(cmd_delete_world(st, sys.argv[i+1], sys.argv[i+2], owner=ist_owner))
         sys.exit(5)
     if "--evict-lab" in sys.argv:
         lab = lab_running()

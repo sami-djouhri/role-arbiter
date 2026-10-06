@@ -190,7 +190,7 @@ class SchutzschritteInDerRichtigenReihenfolge(unittest.TestCase):
     def test_snapshot_kommt_vor_dem_update(self):
         self.m.aktualisieren("valheim", live=True)
         s = self.a.schritte
-        self.assertLess(s.index("--snapshot valheim --live"), s.index("steamcmd:896660"),
+        self.assertLess(s.index("--snapshot valheim --topf vor-einspielen --wer system:update --live"), s.index("steamcmd:896660"),
                         "ein Schnappschuss nach dem Update sichert den neuen Stand, nicht den alten")
 
     def test_wartung_faellt_auch_nach_einem_fehler(self):
@@ -279,7 +279,7 @@ class ModWeg(unittest.TestCase):
         und Snapshot waere genauso riskant wie ein Server-Update ohne beides."""
         self.m.aktualisieren("terraria", live=True, mods=True)
         s = self.a.schritte
-        self.assertLess(s.index("--snapshot terraria --live"), s.index("workshop:1281930"))
+        self.assertLess(s.index("--snapshot terraria --topf vor-einspielen --wer system:update --live"), s.index("workshop:1281930"))
         wartung_an = [i for i, x in enumerate(s) if x.startswith("--wartung-an")]
         self.assertTrue(wartung_an, "ohne Wartung koennte ein Beitritt mitten im Laden wecken")
         self.assertLess(wartung_an[0], s.index("workshop:1281930"))

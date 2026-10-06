@@ -365,7 +365,9 @@ def aktualisieren(name, live, probestart=True, mods=False):
             time.sleep(5)
 
         sagen("   Welt-Schnappschuss anlegen")
-        rc, out = arbiter("--snapshot", name, live=True)
+        # Topf vor-einspielen, nicht manuell: das ist eine Sicherung vor einer Aenderung,
+        # keine Admin-Sicherung, und zaehlt deshalb nicht gegen deren Tageslimit.
+        rc, out = arbiter("--snapshot", name, "--topf", "vor-einspielen", "--wer", "system:update", live=True)
         if rc != 0:
             # Kein Abbruch: die Welt liegt zusaetzlich im naechtlichen Schnappschuss und im
             # restic-Satz. Aber es gehoert in den Bericht, damit niemand glaubt, es haenge
